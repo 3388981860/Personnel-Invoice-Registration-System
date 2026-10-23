@@ -1,0 +1,163 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>人数发票登记台账</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="topbar">
+    <div class="brand"><span class="logo">票</span>人数发票登记台账</div>
+    <div class="stats" id="stats"></div>
+    <div class="actions">
+        <button type="button" onclick="openFolder('archive')">📁 发票存档</button>
+        <button type="button" onclick="openFolder('data')">🗄 数据目录</button>
+        <button type="button" onclick="exportExcel()">⬇ 导出 Excel</button>
+    </div>
+</div>
+
+<main>
+    <!-- ================= 新建报销单 ================= -->
+    <section class="card">
+        <h2>新建报销单</h2>
+
+        <div class="entry-top">
+            <div class="drop drop-compact" id="drop">
+                <div class="icon">＋</div>
+                <div class="main">把发票拖到这里</div>
+                <div class="hint">或点击选择文件<br>支持 PDF / OFD，可一次多张</div>
+            </div>
+            <input type="file" id="file" accept=".pdf,.ofd" multiple hidden>
+
+            <div class="grid grid-shared">
+                <label class="f"><span class="lb">报销人 <span class="req">必填</span></span>
+                    <input id="person" list="personlist" autocomplete="off">
+                    <datalist id="personlist"></datalist>
+                </label>
+                <label class="f"><span class="lb">收款人 <span class="req">必填</span></span>
+                    <input id="payee" list="personlist" autocomplete="off">
+                </label>
+                <label class="f">报销日期
+                    <input type="date" id="reimburse_date">
+                </label>
+                <label class="f"><span class="lb">报销单号 <span class="tip-inline">留空自动生成</span></span>
+                    <input id="batch_no" autocomplete="off">
+                </label>
+                <label class="f wide2">本单备注
+                    <input id="batch_note" placeholder="选填，作用于这一整单">
+                </label>
+            </div>
+        </div>
+
+        <div class="stage">
+            <div class="stage-hd">
+                <span class="stage-title">本单发票</span>
+                <span class="stage-sum" id="stageSum">还没有发票</span>
+            </div>
+            <div class="tablewrap stage-wrap">
+                <table class="stage-table">
+                    <thead>
+                        <tr>
+                            <th style="width:46px">#</th>
+                            <th style="width:250px">发票号码</th>
+                            <th style="width:150px">开票日期</th>
+                            <th style="width:150px">金额（含税）</th>
+                            <th style="width:500px">销售方</th>
+                            <th style="width:420px">提示</th>
+                            <th class="ops" style="width:84px">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stageBody"></tbody>
+                </table>
+                <div class="empty" id="stageEmpty">还没有发票。把发票拖到左上角，或点下面的「手工加一行」。</div>
+            </div>
+        </div>
+
+        <div class="btns">
+            <button class="plain" id="addRow">＋ 手工加一行</button>
+            <button class="primary" id="submitBatch">提交报销单</button>
+            <button class="plain" id="clearStage">清 空</button>
+            <span class="busy" id="busy">识别中…</span>
+        </div>
+    </section>
+
+    <div class="alert" id="alert"></div>
+
+    <!-- ================= 登记台账 ================= -->
+    <section class="card">
+        <h2>登记台账</h2>
+        <div class="filters">
+            <input type="search" id="q" placeholder="搜索 发票号码 / 单号 / 销售方 / 报销人 / 收款人">
+            <select id="fperson"><option value="">全部报销人</option></select>
+            <select id="fmonth"><option value="">全部月份</option></select>
+            <select id="fstatus">
+                <option value="">全部状态</option>
+                <option value="0">未报销</option>
+                <option value="1">已报销</option>
+            </select>
+            <select id="fbatch"><option value="">全部报销单</option><option value="none">未归单</option></select>
+            <button class="plain" id="refresh">刷新</button>
+            <span class="count" id="count"></span>
+        </div>
+
+        <div class="selbar" id="selbar">
+            <span>已选 <b id="selCount">0</b> 张发票</span>
+            <button type="button" class="plain" id="btnNewBatch">新建报销单</button>
+            <button type="button" class="plain" id="btnAttach">加入已有报销单…</button>
+            <button type="button" class="plain" id="btnDetach">从单里拆出</button>
+            <button type="button" class="plain" id="btnClearSel">取消选择</button>
+        </div>
+
+        <div class="tablewrap">
+            <table class="grid-table">
+                <thead>
+                    <tr>
+                        <th style="width:44px"><input type="checkbox" id="checkAll" title="全选"></th>
+                        <th style="width:150px" class="sortable" data-sort="batch_no">报销单号 <span class="arrow"></span></th>
+                        <th style="width:190px" class="sortable" data-sort="invoice_no">发票号码 <span class="arrow"></span></th>
+                        <th style="width:110px" class="sortable" data-sort="invoice_date">开票日期 <span class="arrow"></span></th>
+                        <th style="width:120px" class="sortable" data-sort="amount">金额（含税） <span class="arrow"></span></th>
+                        <th style="width:100px" class="sortable" data-sort="person">报销人 <span class="arrow"></span></th>
+                        <th style="width:110px">收款人</th>
+                        <th style="width:130px" class="sortable" data-sort="status">报销状态 <span class="arrow"></span></th>
+                        <th>备注</th>
+                        <th class="ops" style="width:116px">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="tbody"></tbody>
+            </table>
+            <div class="empty" id="empty">还没有登记记录。拖入第一张发票试试。</div>
+        </div>
+    </section>
+</main>
+
+<!-- 发票详情 / 报销单详情共用右侧抽屉 -->
+<div class="drawer-mask" id="drawerMask"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+    <div class="drawer-hd">
+        <h3 id="drawerTitle">详情</h3>
+        <button type="button" class="drawer-x" id="drawerClose" title="关闭（Esc）">×</button>
+    </div>
+    <div class="drawer-bd" id="drawerBody"></div>
+    <div class="drawer-ft" id="drawerFoot"></div>
+</aside>
+
+<!-- 选择报销单的小窗口 -->
+<div class="modal-mask" id="modalMask"></div>
+<div class="modal" id="modal" aria-hidden="true">
+    <div class="modal-hd">
+        <h3 id="modalTitle">加入已有报销单</h3>
+        <button type="button" class="drawer-x" id="modalClose">×</button>
+    </div>
+    <div class="modal-bd">
+        <input type="search" id="modalSearch" placeholder="搜索报销单号 / 报销人 / 收款人">
+        <div class="batch-list" id="batchList"></div>
+    </div>
+</div>
+
+<div id="toast"></div>
+<script src="/static/app.js"></script>
+
+</body>
+</html>
