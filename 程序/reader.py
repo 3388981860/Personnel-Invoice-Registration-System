@@ -137,13 +137,20 @@ def extract_from_pdf(path):
         "page_count": 0,
         "text_layer": False,
         "source": None,
+        "reader_missing": False,
         "warnings": [],
     }
 
     try:
         fitz = import_fitz()
     except ImportError:
-        res["warnings"].append("缺少 PDF 解析组件，无法自动识别，请手工输入发票号码")
+        # 运行库丢了或被安全软件清理了。给出能照做的提示。
+        res["reader_missing"] = True
+        res["warnings"].append(
+            "缺少 PDF 解析组件 —— 项目里的「运行库」文件夹丢失或不完整"
+            "（常见原因：升级时没把「运行库」一起带过来，或被安全软件清理）。"
+            "请把完整的「运行库」文件夹放回项目目录，然后关掉黑窗口重新双击 启动.bat。"
+        )
         return res
 
     try:

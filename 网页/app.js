@@ -137,6 +137,7 @@ function newStageItem(fields, token, fileName) {
         category: f.category || '',
         source: f.source || '',
         warnings: f.warnings || [],
+        reader_missing: !!f.reader_missing,
         dup: null,
         error: '',
         _checked: null
@@ -199,6 +200,14 @@ function updateStageFlags() {
         var no = digits(it.invoice_no);
         var msgs = [];
 
+        // 运行库丢了：只提示这一件事，别的提示都别刷屏
+        if (it.reader_missing) {
+            tr.className = 'bad';
+            cell.innerHTML = '⛔ <b>缺少 PDF 解析组件</b>，无法自动识别号码。<br>' +
+                '请把完整的「运行库」文件夹放回项目目录，然后重启。';
+            return;
+        }
+
         if (it.dup) msgs.push('⛔ 这张之前登记过了');
         if (it.error) msgs.push('⚠ ' + it.error);
         if (no && no.length !== 20) msgs.push('⚠ 号码 ' + no.length + ' 位（应为 20 位）');
@@ -241,6 +250,7 @@ function handleFiles(files) {
     var arr = Array.prototype.slice.call(files);
     $('busy').classList.add('show');
     var left = arr.length;
+    var readerMissing = false;
     arr.forEach(function (f) {
         f.arrayBuffer().then(function (buf) {
             return fetch('/api/parse', {
@@ -252,6 +262,7 @@ function handleFiles(files) {
             if (!r.ok) { toast(r.error || ('识别失败：' + f.name), 'err'); return; }
             var it = newStageItem(r.fields, r.exists ? null : r.token, r.file_name);
             if (r.exists) it.dup = r.record;
+            if (it.reader_missing) readerMissing = true;
             state.stage.push(it);
         }).catch(function () {
             toast('识别失败：' + f.name, 'err');
@@ -261,6 +272,16 @@ function handleFiles(files) {
                 $('busy').classList.remove('show');
                 renderStage();
                 checkStageDup();
+                if (readerMissing) {
+                    showAlert('danger', '⛔ 系统缺少 PDF 解析组件，读不出发票号码',
+                        '项目里的「<b>运行库</b>」文件夹丢失或不完整，所以没法自动识别发票。<br><br>' +
+                        '<b>怎么修：</b><br>' +
+                        '1. 关掉那个黑色窗口<br>' +
+                        '2. 把完整的「<b>运行库</b>」文件夹放回项目目录（和 启动.bat 同一层），提示覆盖选「是」<br>' +
+                        '3. 重新双击 启动.bat<br><br>' +
+                        '💡 也请跑一下项目里的「<b>自检.bat</b>」，把生成的「自检报告.txt」发给管理员，' +
+                        '好确认是不是运行库出的问题。');
+                }
             }
         });
     });

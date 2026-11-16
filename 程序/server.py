@@ -609,6 +609,21 @@ def main():
     print("-" * 58)
     print("  关闭本窗口即退出系统（数据已实时保存，不会丢失）")
     print("=" * 58)
+
+    # 启动时自检：PDF 解析组件在不在
+    try:
+        reader.import_fitz()
+    except Exception as exc:
+        print()
+        print("!" * 58)
+        print("  【重要】缺少 PDF 解析组件，发票号码将无法自动识别！")
+        print("  原因： %s" % exc)
+        print("  程序找的运行库目录： %s" % LIB_DIR)
+        print("  该目录存在吗： %s" % os.path.isdir(LIB_DIR))
+        print("  解决办法：把完整的「运行库」文件夹放回项目目录，")
+        print("            然后关掉本窗口，重新双击 启动.bat。")
+        print("  也可以双击项目里的「自检.bat」生成检测报告。")
+        print("!" * 58)
     try:
         sys.stdout.flush()
     except Exception:
