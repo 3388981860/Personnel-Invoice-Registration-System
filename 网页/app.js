@@ -417,6 +417,30 @@ function renderStats(s) {
         '<span>本月 <b>' + s.month.count + '</b> 张　合计 <span class="money">' + moneyY(s.month.amount) + '</span></span>' +
         '<span>本年 <b>' + s.year.count + '</b> 张　合计 <span class="money">' + moneyY(s.year.amount) + '</span></span>' +
         '<span>累计 <b>' + s.total.count + '</b> 张　合计 <span class="money">' + moneyY(s.total.amount) + '</span></span>';
+    renderAuditStat(s);
+}
+
+/* 台账标题旁边的"查验概况"：全部 + 本月 */
+function renderAuditStat(s) {
+    var a = s.audit || { 0: 0, 1: 0, 2: 0, 3: 0 };
+    var m = s.audit_month || { 0: 0, 1: 0, 2: 0, 3: 0 };
+    var total = (a[0] || 0) + (a[1] || 0) + (a[2] || 0) + (a[3] || 0);
+    if (!total) { $('auditStat').innerHTML = ''; return; }
+    var bits = [];
+    if (a[1]) bits.push('<span class="tag au-pass">通过 ' + a[1] + '</span>');
+    if (a[2]) bits.push('<span class="tag au-fail">不通过 ' + a[2] + '</span>');
+    if (a[0]) bits.push('<span class="tag au-none">未查 ' + a[0] + '</span>');
+    if (a[3]) bits.push('<span class="tag au-skip">无需查 ' + a[3] + '</span>');
+    var mt = (m[0] || 0) + (m[1] || 0) + (m[2] || 0) + (m[3] || 0);
+    var html = '查验 ' + bits.join(' ') +
+        (mt ? '　<span class="au-stat-month">本月 ' + mt + ' 张：通过 ' + (m[1] || 0) +
+            (m[2] ? ' / 不通过 ' + m[2] : '') +
+            (m[0] ? ' / 未查 ' + m[0] : '') + '</span>' : '');
+    if (s.audit_warn) {
+        html += '<span class="au-legend"><span class="au-warn">!</span>' +
+            ' = 查验通过了，但有 ' + s.audit_warn + ' 张需要留意（点开详情看原因）</span>';
+    }
+    $('auditStat').innerHTML = html;
 }
 
 function renderPersons(list) {
@@ -493,14 +517,28 @@ function auditStatus(r) {
     return isNaN(v) ? 0 : v;
 }
 
-function auditBadge(r) {
-    var v = auditStatus(r);
+/* 收款人 ≠ 报销人：只做弱提示，不点亮感叹号 */
+function payeeHintText(r) {
+    var person = (r.person || '').trim();
+    var payee = (r.payee || '').trim();
+    if (person && payee && person !== payee) {
+        return '收款人（' + payee + '）与报销人（' + person + '）不是同一人，付款前确认一下。';
+    }
+    return '';
+}
+
+function auditBadge(r) {    var v = auditStatus(r);
     var tip = AUDIT_TEXT[v];
     if (r.audit_at) tip += '（' + r.audit_at + '）';
     if (r.audit_msg) tip += '\n' + r.audit_msg;
+    if (r.audit_warn) tip += '\n⚠ ' + r.audit_warn;
     if (v === 0) tip += '\n还没查过，勾选后点「查验选中」';
-    return '<span class="tag ' + (AUDIT_CLASS[v] || 'au-none') + '" title="' + esc(tip) + '">' +
+    var html = '<span class="tag ' + (AUDIT_CLASS[v] || 'au-none') + '" title="' + esc(tip) + '">' +
         AUDIT_TEXT[v] + '</span>';
+    if (r.audit_warn) {
+        html += '<span class="au-warn" title="' + esc('⚠ ' + r.audit_warn) + '">!</span>';
+    }
+    return html;
 }
 
 function renderTable() {
@@ -651,9 +689,25 @@ function pollAudit() {
             scheduleAuditPoll(1500);
         } else {
             clearSelection();
-            loadList();
+            loadList().then(refreshOpenDrawer);
         }
     });
+}
+
+/* 查验跑完后，如果详情抽屉还开着，把里面的查验结果一起刷新，
+   否则会出现"平台刚查过、抽屉里还显示旧时间"的情况 */
+function refreshOpenDrawer() {
+    var d = state.drawer;
+    if (!d) return;
+    if (d.type === 'invoice') {
+        renderInvoiceDrawer();
+    } else if (d.type === 'batch') {
+        api('/api/batch?id=' + d.id).then(function (r) {
+            if (!r.ok) return;
+            state.drawer.batch = r.batch;
+            renderBatchDrawer();
+        });
+    }
 }
 
 function renderAudit(s) {
@@ -686,12 +740,23 @@ function showShotBig(id) {
         box = document.createElement('div');
         box.id = 'shotBig';
         box.className = 'au-shot-big';
-        box.innerHTML = '<img alt="查验结果截图">';
-        box.addEventListener('click', function () { box.classList.remove('show'); });
+        box.innerHTML = '<img alt="查验结果截图">' +
+            '<div class="au-shot-tip">点任意处关闭</div>';
+        box.addEventListener('click', function () { hideShotBig(); });
         document.body.appendChild(box);
     }
     box.querySelector('img').src = '/api/audit/shot?id=' + id + '&t=' + Date.now();
     box.classList.add('show');
+}
+
+function hideShotBig() {
+    var box = document.getElementById('shotBig');
+    if (box) box.classList.remove('show');
+}
+
+function shotBigOpen() {
+    var box = document.getElementById('shotBig');
+    return !!(box && box.classList.contains('show'));
 }
 
 
@@ -831,6 +896,15 @@ function renderInvoiceDrawer() {
         h += dlRow('查验状态', auditBadge(r));
         h += dlRow('查验时间', esc(r.audit_at || '—'));
         h += dlRow('查验说明', esc(r.audit_msg || '—'));
+        // 弱提示：按台账现有人名现场算，改了人立刻消失，不进感叹号
+        var payeeHint = payeeHintText(r);
+        if (payeeHint) h += dlRow('一点提示', '<span class="au-note">' + esc(payeeHint) + '</span>');
+        if (r.audit_warn) {
+            var ws = String(r.audit_warn).split('；').filter(function (x) { return x.trim(); });
+            h += '<div class="dl-row"><div class="dl-k">需要留意</div><div class="dl-v">' +
+                ws.map(function (x) { return '<div class="au-warn-row">⚠ ' + esc(x) + '</div>'; }).join('') +
+                '</div></div>';
+        }
         if (r.audit_shot) {
             h += '<div class="dl-row"><div class="dl-k">结果截图</div>' +
                 '<div class="dl-v">' +
@@ -914,12 +988,13 @@ function renderBatchDrawer() {
         if (b.status === 1) h += dlRow('报销确认时间', esc(b.paid_at || '—'));
         h += dlRow('本单合计', '<span class="big">' + moneyY(b.amount) + '</span>');
         h += dlRow('发票张数', b.count + ' 张');
+        h += dlRow('查验情况', batchAuditSummary(b.invoices || []));
         h += dlRow('备注', esc(b.note || '—'));
         h += dlRow('建单时间', esc(b.created_at || '—'));
 
         h += '<div class="dl-sec">本单明细</div>';
         h += '<div class="mini-wrap"><table class="mini"><thead><tr>' +
-            '<th>#</th><th>发票号码</th><th>开票日期</th><th>金额</th><th>状态</th></tr></thead><tbody>';
+            '<th>#</th><th>发票号码</th><th>开票日期</th><th>金额</th><th>状态</th><th>查验</th></tr></thead><tbody>';
         (b.invoices || []).forEach(function (i, idx) {
             h += '<tr data-inv="' + i.id + '"><td>' + (idx + 1) + '</td>' +
                 '<td class="no">' + esc(i.invoice_no) + '</td>' +
@@ -927,7 +1002,8 @@ function renderBatchDrawer() {
                 '<td class="money">' + moneyY(i.amount) + '</td>' +
                 '<td>' + (Number(i.status) === 1
                     ? '<span class="tag ok">已报销</span>'
-                    : '<span class="tag bad">未报销</span>') + '</td></tr>';
+                    : '<span class="tag bad">未报销</span>') + '</td>' +
+                '<td>' + auditBadge(i) + '</td></tr>';
         });
         h += '</tbody></table></div>';
         h += '<div class="dl-note">点上面任意一行，可以打开那张发票的详情。</div>';
@@ -936,11 +1012,30 @@ function renderBatchDrawer() {
             (b.status === 1
                 ? '<button type="button" data-d="batchstatus" data-v="0">整单改回未报销</button>'
                 : '<button type="button" data-d="batchstatus" data-v="1" class="solid">整单标记已报销</button>') +
+            '<button type="button" data-d="auditbatch">查验本单</button>' +
             '<button type="button" data-d="editbatch">修改单信息</button>' +
             '<span class="spacer"></span>' +
             '<button type="button" class="danger" data-d="delbatch">删除整单</button>';
     }
     $('drawerBody').innerHTML = h;
+}
+
+/* 一张报销单的查验汇总，例如「3 张：通过 2 / 未查 1」 */
+function batchAuditSummary(invs) {
+    if (!invs.length) return '—';
+    var c = { 0: 0, 1: 0, 2: 0, 3: 0 }, warn = 0;
+    invs.forEach(function (i) {
+        c[auditStatus(i)] = (c[auditStatus(i)] || 0) + 1;
+        if (i.audit_warn) warn++;
+    });
+    var parts = [];
+    if (c[1]) parts.push('<span class="tag au-pass">通过 ' + c[1] + '</span>');
+    if (c[2]) parts.push('<span class="tag au-fail">不通过 ' + c[2] + '</span>');
+    if (c[0]) parts.push('<span class="tag au-none">未查 ' + c[0] + '</span>');
+    if (c[3]) parts.push('<span class="tag au-skip">无需查 ' + c[3] + '</span>');
+    var s = parts.join(' ');
+    if (warn) s += ' <span class="au-warn" title="本单有 ' + warn + ' 张带提示">!</span>';
+    return s;
 }
 
 function saveBatchEdit() {
@@ -1149,6 +1244,18 @@ $('drawerFoot').addEventListener('click', function (ev) {
     else if (act === 'del') deleteInvoice(id, function () { closeDrawer(); loadList(); });
     else if (act === 'openbatch') { var r0 = findRecord(id); if (r0) openBatchDrawer(r0.batch_id); }
     else if (act === 'batchstatus') setBatchStatus(id, Number(btn.dataset.v));
+    else if (act === 'auditbatch') {
+        var bb = state.drawer.batch || {};
+        var ids = (bb.invoices || []).filter(function (i) {
+            return auditStatus(i) !== 1;      // 已经通过的不必再查，省配额
+        }).map(function (i) { return i.id; });
+        if (!ids.length) {
+            toast('本单发票都已查验通过，不用再查');
+            return;
+        }
+        startAudit({ ids: ids });
+        toast('开始查验本单 ' + ids.length + ' 张，进度在右下角', 'ok');
+    }
     else if (act === 'editbatch') { state.drawerEdit = 'batch'; renderBatchDrawer(); }
     else if (act === 'savebatch') saveBatchEdit();
     else if (act === 'delbatch') {
@@ -1230,6 +1337,7 @@ $('q').addEventListener('input', function () {
 $('refresh').addEventListener('click', loadList);
 
 document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && shotBigOpen()) { hideShotBig(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); submitBatch(); }
     if (e.key === 'Escape') {
         if ($('modal').classList.contains('show')) { closeModal(); return; }

@@ -38,6 +38,7 @@ COLUMNS = [
     ("audit_at", "TEXT"),
     ("audit_msg", "TEXT"),
     ("audit_shot", "TEXT"),
+    ("audit_warn", "TEXT"),
     ("created_at", "TEXT"),
     ("updated_at", "TEXT"),
 ]
@@ -53,6 +54,7 @@ MIGRATIONS = [
     ("audit_at", "TEXT"),                    # 查验时间
     ("audit_msg", "TEXT"),                   # 平台返回的说明
     ("audit_shot", "TEXT"),                  # 结果截图相对路径
+    ("audit_warn", "TEXT"),                  # 业务提示（抬头/收款人/跨月等）
 ]
 
 # 报销单
@@ -90,6 +92,7 @@ EXCEL_HEADERS = [
     ("audit_status", "查验状态"),
     ("audit_at", "查验时间"),
     ("audit_msg", "查验说明"),
+    ("audit_warn", "查验提示"),
     ("note", "备注"),
     ("created_at", "登记时间"),
 ]
@@ -283,6 +286,25 @@ class Store(object):
                     "SELECT COALESCE(audit_status,0) s, COUNT(*) c FROM invoices GROUP BY s"):
                 aud[int(r[0] or 0)] = int(r["c"])
             out["audit"] = aud
+            row = conn.execute(
+                "SELECT COUNT(*) c FROM invoices "
+                "WHERE audit_warn IS NOT NULL AND audit_warn <> ''").fetchone()
+            out["audit_warn"] = int(row["c"])
+            # 按月统计查验情况（最近 6 个月），给界面上的"查验概况"用
+            by_month = {}
+            for r in conn.execute(
+                    "SELECT substr(COALESCE(invoice_date, created_at),1,7) m, "
+                    "       COALESCE(audit_status,0) s, COUNT(*) c "
+                    "FROM invoices WHERE m IS NOT NULL AND m <> '' "
+                    "GROUP BY m, s ORDER BY m"):
+                by_month.setdefault(r["m"], {0: 0, 1: 0, 2: 0, 3: 0})
+                by_month[r["m"]][int(r["s"] or 0)] = int(r["c"])
+            out["audit_by_month"] = [
+                {"month": m, "0": v[0], "1": v[1], "2": v[2], "3": v[3]}
+                for m, v in sorted(by_month.items())[-6:]
+            ]
+            cur = by_month.get(month, {0: 0, 1: 0, 2: 0, 3: 0})
+            out["audit_month"] = {"0": cur[0], "1": cur[1], "2": cur[2], "3": cur[3]}
         return out
 
     def set_status(self, rid, status):
@@ -297,28 +319,32 @@ class Store(object):
         self.sync_excel()
         return self.get(rid)
 
-    def set_audit(self, rid, status, msg=None, shot=None):
+    def set_audit(self, rid, status, msg=None, shot=None, warn=None, quiet=False):
         """
         写回查验结果。
         status：0 未查验 / 1 查验通过 / 2 查验不通过 / 3 无需查验
         shot  ：结果截图的相对路径（相对项目根目录）
+        warn  ：业务提示，多条用"；"连接（抬头、收款人、跨月等）
+        quiet ：True 时不立刻重写 Excel（批量写的时候由调用方最后统一同步一次）
         """
         status = int(status or 0)
         stamp = now_str()
         with self._conn() as conn:
             conn.execute(
                 "UPDATE invoices SET audit_status = ?, audit_at = ?, "
-                "audit_msg = ?, audit_shot = ?, updated_at = ? WHERE id = ?",
-                (status, stamp, (msg or None), shot, stamp, rid)
+                "audit_msg = ?, audit_shot = ?, audit_warn = ?, updated_at = ? "
+                "WHERE id = ?",
+                (status, stamp, (msg or None), shot, (warn or None), stamp, rid)
             )
-        self.sync_excel()
+        if not quiet:
+            self.sync_excel()
         return self.get(rid)
 
     def clear_audit(self, ids=None):
         """清空查验结果（重新查验前用）。ids 为空表示全部清空。"""
         ids = [int(x) for x in (ids or [])]
         sql = ("UPDATE invoices SET audit_status = 0, audit_at = NULL, "
-               "audit_msg = NULL, audit_shot = NULL, updated_at = ?")
+               "audit_msg = NULL, audit_shot = NULL, audit_warn = NULL, updated_at = ?")
         args = [now_str()]
         if ids:
             sql += " WHERE id IN (%s)" % ",".join("?" for _ in ids)
@@ -625,6 +651,9 @@ class Store(object):
         rec["file_rel"] = file_rel
         rec["file_name"] = file_name
         rec["status"] = int(data.get("status") or 0)   # 新登记的默认「未报销」
+        # 新登记的默认「未查验」；显式写 0 而不是留 NULL，
+        # 否则 SQLite 的列默认值不会生效（字段出现在 INSERT 里就会被写成 NULL）
+        rec["audit_status"] = int(data.get("audit_status") or 0)
         rec["paid_at"] = data.get("paid_at")
         rec["created_at"] = now_str()
         rec["updated_at"] = rec["created_at"]
@@ -743,7 +772,7 @@ class Store(object):
                 if key in ("amount", "amount_net", "tax") and v is not None:
                     ws.cell(row=r, column=c).number_format = "#,##0.00"
         widths = [18, 24, 12, 15, 13, 10, 32, 26, 22, 10, 10, 12, 10, 20,
-                  12, 20, 30, 26, 20]
+                  12, 20, 30, 40, 26, 20]
         for i, w in enumerate(widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
         ws.freeze_panes = "A2"

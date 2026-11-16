@@ -74,6 +74,11 @@ CONFIG = {
     "captcha_tries": 6,        # 连续识别不出验证码时的尝试次数
     "captcha_rounds": 4,       # 验证码被平台判错后，最多重来几轮
     "browser_path": "",        # 指定 chrome.exe 全路径；留空=用 Playwright 自己找
+    # ---- 业务审核规则（P3）----
+    "company_names": [],       # 抬头白名单，如 ["浙江信宇科技有限公司"]；空=不检查
+    "warn_amount": 0,          # 单张金额 ≥ 这个数就提示（0=不检查）
+    "warn_cross_month": False, # 跨月报销提示。默认关闭：公司习惯次月报，开着太吵
+    "backoff": [60, 180, 300], # 被平台限流后的等待秒数（依次递增）
 }
 
 SELECTORS = {
@@ -144,6 +149,33 @@ def _load_config():
 
 
 _load_config()
+
+
+def preset_skip(record):
+    """
+    登记时就能确定的"平台不给查"的情况，直接标成无需查验，
+    免得它排在待查列表里、每次都要白跑一遍才知道。
+    返回 (status, msg) 或 None（None 表示需要查验）。
+    """
+    no = _digits(record.get("invoice_no"))
+    if len(no) not in (20, 8):
+        return AUDIT_SKIP, "发票号码是 %d 位，平台只接受 20 位（数电票）或 8 位（老票）" % len(no)
+
+    kprq = _compact_date(record.get("invoice_date"))
+    if not kprq:
+        return None
+    try:
+        d = datetime.strptime(kprq, "%Y%m%d")
+        now = datetime.now()
+        try:
+            five = now.replace(year=now.year - 5)
+        except ValueError:
+            five = now.replace(year=now.year - 5, day=28)
+        if d <= five:
+            return AUDIT_SKIP, "开票时间超过 5 年，平台不提供查验"
+    except ValueError:
+        pass
+    return None
 
 
 def model_dir(version=None):
@@ -642,17 +674,17 @@ def _verify_once(page, query, sel, recognizer, color_parser):
             continue
 
         if status != AUDIT_PASS:
-            return status, msg, ""
+            return status, msg, "", data
 
-        # 通过：等结果弹窗出来，拿文字 + 截图
+        # 通过：等结果弹窗出来，拿文字（截图在 _one 里做）
         for _ in range(20):
             if _result_ready(page, sel):
                 break
             time.sleep(0.3)
         body = _result_text(page, sel)
-        return AUDIT_PASS, msg, body
+        return AUDIT_PASS, msg, body, data
 
-    return AUDIT_NONE, "验证码多次不正确", ""
+    return AUDIT_NONE, "验证码多次不正确", "", None
 
 
 def _first_hit(text):
@@ -661,6 +693,125 @@ def _first_hit(text):
         if line and any(w in line for w in FAIL_WORDS):
             return line[:60]
     return "平台提示信息不一致"
+
+
+def _is_rate_limited(msg):
+    m = str(msg or "")
+    return any(k in m for k in ("次数", "频繁", "超限", "稍后", "休息"))
+
+
+def _backoff_seconds(i):
+    seq = CONFIG.get("backoff") or [60, 180, 300]
+    try:
+        return int(seq[min(i, len(seq) - 1)])
+    except (TypeError, ValueError, IndexError):
+        return 60
+
+
+# ----------------------------------------------------------------------
+# 一致性比对 / 内控提示
+# ----------------------------------------------------------------------
+def _norm_text(s):
+    """比对名称用：去掉空白和常见标点，避免"有限公司。" vs "有限公司" 这种假差异。"""
+    return re.sub(r"[\s\u3000（）()·.,，、:：;；\-]+", "", str(s or ""))
+
+
+def platform_fields(data):
+    """把平台返回里真正有用的字段抽出来。"""
+    d = (data.get("Response") or {}).get("Data") or {}
+    vo = d.get("DzfpFpxxVO") or {}
+    items = []
+    for x in (vo.get("MxzbList") or []):
+        name = x.get("Hwhyslwfwmc") or x.get("Xmmc") or ""
+        if name:
+            items.append(name)
+    return {
+        "no": _digits(vo.get("Fphm")),
+        "date": _digits(vo.get("Kprq"))[:8],
+        "amount": vo.get("Jshj"),
+        "amount_net": vo.get("Hjje"),
+        "tax": vo.get("Hjse"),
+        "buyer": (vo.get("Gmfmc") or "").strip(),
+        "buyer_tax": (vo.get("Gmfnsrsbh") or "").strip(),
+        "seller": (vo.get("Xsfmc") or "").strip(),
+        "seller_tax": (vo.get("Xsfnsrsbh") or "").strip(),
+        "items": items,
+        "status": vo.get("FpztDm"),
+    }
+
+
+def compare(record, plat):
+    """
+    台账 vs 平台 逐项比对。
+    返回 (hard, soft)：
+        hard —— 号码/日期/价税合计对不上，属于"这不是同一张票"，判不通过
+        soft —— 销售方名称有出入，多半是台账 OCR 的锅，只提示
+    """
+    hard, soft = [], []
+
+    no = _digits(record.get("invoice_no"))
+    if plat.get("no") and plat["no"] != no:
+        hard.append("发票号码不一致（台账 %s / 平台 %s）" % (no, plat["no"]))
+
+    d1 = _compact_date(record.get("invoice_date"))
+    d2 = plat.get("date") or ""
+    if d1 and d2 and d1 != d2:
+        hard.append("开票日期不一致（台账 %s / 平台 %s）" % (d1, d2))
+
+    try:
+        a1 = float(record.get("amount"))
+        a2 = float(plat.get("amount"))
+        if abs(a1 - a2) > 0.011:
+            hard.append("价税合计不一致（台账 %.2f / 平台 %.2f）" % (a1, a2))
+    except (TypeError, ValueError):
+        pass
+
+    s1 = _norm_text(record.get("seller"))
+    s2 = _norm_text(plat.get("seller"))
+    if s1 and s2 and s1 != s2:
+        soft.append("销售方名称有出入（台账「%s」/ 平台「%s」）" % (
+            (record.get("seller") or "")[:30], plat["seller"][:30]))
+
+    return hard, soft
+
+
+def internal_warnings(record, plat):
+    """
+    业务内控提示：不改变查验结论，只是在界面上提醒人看一眼。
+    """
+    warns = []
+
+    # 1) 抬头是不是本公司
+    names = [_norm_text(x) for x in (CONFIG.get("company_names") or []) if str(x).strip()]
+    buyer = plat.get("buyer") or (record.get("buyer") or "")
+    if names and buyer:
+        nb = _norm_text(buyer)
+        if not any(n and (n in nb or nb in n) for n in names):
+            warns.append("购买方不是本公司（%s）" % buyer)
+
+    # 2) 收款人与报销人不是同一人
+    #    这条故意不做成"警告"（不写进 audit_warn、不点亮感叹号），
+    #    因为它太常见（代报、家属代收），做成硬提示会让人对感叹号麻木。
+    #    界面按台账现有的 报销人/收款人 现场派生一句灰字提示即可，
+    #    好处是改对了人提示立刻消失，不用重新查验。
+
+    # 3) 跨月报销（默认关闭：公司习惯次月报）
+    if CONFIG.get("warn_cross_month", False):
+        kp = (record.get("invoice_date") or "")[:7]
+        rb = (record.get("reimburse_date") or "")[:7]
+        if kp and rb and kp != rb:
+            warns.append("跨月报销（开票 %s，报销 %s）" % (kp, rb))
+
+    # 4) 大额提示
+    try:
+        limit = float(CONFIG.get("warn_amount") or 0)
+        amt = float(plat.get("amount"))
+        if limit > 0 and amt >= limit:
+            warns.append("金额较大（%.2f 元），建议二次确认" % amt)
+    except (TypeError, ValueError):
+        pass
+
+    return warns
 
 
 # ----------------------------------------------------------------------
@@ -817,18 +968,43 @@ class Runner(object):
             self._bump("done")
             return
 
-        status, msg, shot = AUDIT_NONE, "查验失败", None
+        status, msg, shot, warn = AUDIT_NONE, "查验失败", None, ""
+        backoff_i = 0
         for attempt in range(CONFIG["retries"]):
             page = None
             try:
                 page = browser.new_page()
-                status, msg, _body = _verify_once(page, query, sel, recognizer, color_parser)
-                if status == AUDIT_PASS:
+                status, msg, _body, data = _verify_once(page, query, sel,
+                                                         recognizer, color_parser)
+
+                if status == AUDIT_PASS and data:
+                    # 台账 vs 平台 逐项比对：号码/日期/价税合计对不上，就不算通过
+                    plat = platform_fields(data)
+                    hard, soft = compare(rec, plat)
+                    warns = soft + internal_warnings(rec, plat)
+                    warn = "；".join(warns)
+                    if hard:
+                        status = AUDIT_FAIL
+                        msg = "信息不一致：" + "；".join(hard)
+                        self._log("%s 与台账不一致：%s" % (no, "；".join(hard)))
+                    elif warns:
+                        self._log("%s 查验通过，但有 %d 条提示" % (no, len(warns)))
+
+                # 有结果弹窗就截图（通过 / 不一致都留证）
+                if status in (AUDIT_PASS, AUDIT_FAIL):
                     rel = shot_rel_path(no)
                     if _capture(page, sel, os.path.join(BASE, rel)):
                         shot = rel
                     else:
                         self._log("截图失败：%s" % no)
+
+                # 被平台限流：等一会儿再重试，别硬撞
+                if status == AUDIT_NONE and _is_rate_limited(msg):
+                    wait = _backoff_seconds(backoff_i)
+                    self._log("平台限流（%s），等 %d 秒再试" % (msg, wait))
+                    time.sleep(wait)
+                    backoff_i += 1
+                    continue
                 break
             except Exception as exc:
                 msg = "查验出错：%s" % str(exc)[:120]
@@ -849,5 +1025,5 @@ class Runner(object):
         else:
             self._log("未能查验 %s：%s" % (no, msg))
 
-        self.store.set_audit(rec["id"], status, msg, shot)
+        self.store.set_audit(rec["id"], status, msg, shot, warn)
         self._bump("done")

@@ -59,12 +59,12 @@
                 <table class="stage-table">
                     <thead>
                         <tr>
-                            <th style="width:46px">#</th>
-                            <th style="width:250px">发票号码</th>
-                            <th style="width:150px">开票日期</th>
-                            <th style="width:150px">金额（含税）</th>
-                            <th style="width:500px">销售方</th>
-                            <th style="width:420px">提示</th>
+                            <th style="width:40px">#</th>
+                            <th style="width:210px">发票号码</th>
+                            <th style="width:120px">开票日期</th>
+                            <th style="width:130px">金额（含税）</th>
+                            <th style="width:300px">销售方</th>
+                            <th style="width:330px">提示</th>
                             <th class="ops" style="width:84px">操作</th>
                         </tr>
                     </thead>
@@ -86,7 +86,7 @@
 
     <!-- ================= 登记台账 ================= -->
     <section class="card">
-        <h2>登记台账</h2>
+        <h2>登记台账 <span class="au-stat" id="auditStat"></span></h2>
         <div class="filters">
             <input type="search" id="q" placeholder="搜索 发票号码 / 单号 / 销售方 / 报销人 / 收款人">
             <select id="fperson"><option value="">全部报销人</option></select>
@@ -129,7 +129,7 @@
                         <th style="width:100px" class="sortable" data-sort="person">报销人 <span class="arrow"></span></th>
                         <th style="width:110px">收款人</th>
                         <th style="width:130px" class="sortable" data-sort="status">报销状态 <span class="arrow"></span></th>
-                        <th style="width:96px">查验</th>
+                        <th style="width:116px">查验</th>
                         <th>备注</th>
                         <th class="ops" style="width:116px">操作</th>
                     </tr>

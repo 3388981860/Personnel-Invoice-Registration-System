@@ -412,7 +412,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._err("该发票号码已经登记过了", 409, duplicate=True, record=dup.record)
         except Exception as exc:
             return self._err("保存失败：%s" % exc, 500)
+        self._apply_audit_preset([rid])
         return self._json({"ok": True, "id": rid, "record": STORE.get(rid)})
+
+    def _apply_audit_preset(self, ids):
+        """
+        登记完就顺手判断"这张票平台本来就不给查"（比如超过 5 年），
+        直接标成"无需查验"，省得以后排在待查列表里白跑一趟。
+        """
+        changed = False
+        for rid in ids or []:
+            try:
+                rec = STORE.get(int(rid))
+                if not rec or int(rec.get("audit_status") or 0) != 0:
+                    continue
+                preset = audit_mod.preset_skip(rec)
+                if preset:
+                    STORE.set_audit(int(rid), preset[0], preset[1], None, quiet=True)
+                    changed = True
+            except Exception:
+                traceback.print_exc()
+        if changed:
+            try:
+                STORE.sync_excel()
+            except Exception:
+                pass
 
     # ---------------- 报销单 ----------------
     def _tmp_of(self, token):
@@ -461,6 +485,7 @@ class Handler(BaseHTTPRequestHandler):
                              409, duplicate=True, record=rec)
         except Exception as exc:
             return self._err("提交失败：%s" % exc, 500)
+        self._apply_audit_preset(ids)
         return self._json({"ok": True, "batch_id": bid, "ids": ids,
                            "batch": STORE.batch_detail(bid)})
 
