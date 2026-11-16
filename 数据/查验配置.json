@@ -1,0 +1,13 @@
+{
+  "_说明": "发票查验参数。改完保存，重启系统后生效。page_version：new=新版页面（当前有效），old=旧版（已失效）。headless=true 时不弹浏览器窗口，但验证码识别失败时只能等程序重试，建议保持 false。browser_path 留空表示用 Playwright 自动查找；若要指定，写 chrome.exe 的完整路径。captcha_rounds=验证码被平台判错后最多重来几轮。",
+  "page_version": "new",
+  "headless": false,
+  "window_position": "-10,0",
+  "viewport_width": 1400,
+  "viewport_height": 900,
+  "interval": 3,
+  "retries": 2,
+  "captcha_tries": 6,
+  "captcha_rounds": 4,
+  "browser_path": ""
+}

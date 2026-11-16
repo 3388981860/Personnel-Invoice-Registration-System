@@ -1,0 +1,101 @@
+﻿人数发票登记台账  自检报告
+生成时间：2026-11-16 11:53:00
+项目目录：D:\2026\04-信宇科技\02-人数发票登记系统
+Python 版本：3.14.7 (tags/v3.14.7:823f032, Aug  5 2026, 10:51:32) [MSC v.1944 64 bit (AMD64)]
+Python 路径：D:\soft\python\python.exe
+==================================================================
+
+【1】目录检查
+  程序       存在      20 个文件       29.7 MB
+  网页       存在       3 个文件        0.1 MB
+  运行库      存在     676 个文件       71.5 MB
+  数据       存在      11 个文件        0.9 MB
+  发票存档     存在       5 个文件        0.9 MB
+
+【2】运行库关键文件（自动识别 PDF 就靠它们）
+  运行库/pymupdf/__init__.py            存在      0.88 MB
+  运行库/pymupdf/_mupdf.pyd             存在     12.46 MB
+  运行库/pymupdf/_extra.pyd             存在      0.18 MB
+  运行库/pymupdf/mupdfcpp64.dll         存在     25.08 MB
+  运行库/PIL/__init__.py                存在      0.00 MB
+  运行库/openpyxl/__init__.py           存在      0.00 MB
+  运行库/zxingcpp/__init__.py           存在      0.00 MB
+
+【3】运行库 顶层内容
+  PIL
+  bin
+  et_xmlfile
+  et_xmlfile-2.0.0.dist-info
+  fitz
+  openpyxl
+  openpyxl-3.1.5.dist-info
+  pillow-12.3.0.dist-info
+  pymupdf
+  pymupdf-1.28.2.dist-info
+  zxing_cpp-3.1.1.dist-info
+  zxingcpp
+
+【4】模块导入测试
+  pymupdf      成功
+  fitz         成功
+  PIL          成功
+  PIL.Image    成功
+  openpyxl     成功
+  zxingcpp     成功
+
+【5】pymupdf 详细错误（诊断 DLL 问题用）
+  导入正常，版本信息：
+  PyMuPDF 1.28.2: Python bindings for the MuPDF 1.28.2 library. Python 3.14 running on win32 (64-bit). 
+
+【6】PDF 解析实测
+  26317000003461097680.pdf                 读出 415 个字符
+  26327000001715695220.pdf                 读出 410 个字符
+  26337000000840107932.pdf                 读出 421 个字符
+
+【7】数据检查
+  数据库：53248 字节
+  发票记录数：5
+  数据表：invoices, sqlite_sequence, persons, batches
+  报销单数：3
+  发票存档：5 个原件，0.9 MB
+
+【8】程序 / 网页文件
+  程序/server.py           24990 字节
+  程序/store.py            30274 字节
+  程序/reader.py           17912 字节
+  网页/index.html          7759 字节
+  网页/app.js              47155 字节
+  网页/style.css           26817 字节
+  启动.bat                 4496 字节
+
+【8-1】发票查验组件（网页上「查验发票」功能要用）
+  程序/audit.py                                    存在      0.02 MB
+  程序/审核/__init__.py                              存在      0.00 MB
+  程序/审核/captcha.py                               存在      0.00 MB
+  程序/审核/color_parse.py                           存在      0.00 MB
+  程序/审核/extractor.py                             存在      0.00 MB
+  程序/审核/模型/old/inference.onnx                    存在     14.66 MB
+  程序/审核/模型/old/ppocrv5_dict.txt                  存在      0.03 MB
+  程序/审核/模型/new/inference.onnx                    存在     14.66 MB
+  程序/审核/模型/new/ppocrv5_dict.txt                  存在      0.03 MB
+  数据/查验配置.json                                   存在      0.00 MB
+
+  查验用到的 Python 组件：
+    rapidocr     成功
+    onnxruntime  成功
+    numpy        成功
+    PIL          成功
+    playwright   成功
+
+  查验用的浏览器（chromium）：
+    已安装：C:\Users\Administrator\AppData\Local\ms-playwright\chromium-1255\chrome-win64\chrome.exe
+
+【9】系统 Python 里有没有 pymupdf（备用方案用）
+  pymupdf    D:\soft\python\Lib\site-packages\pymupdf
+  fitz       D:\soft\python\Lib\site-packages\fitz
+
+【10】结论
+  运行库关键文件都在。如果还是读不出号码，请把本报告发回给管理员。
+
+==================================================================
+报告结束。请把「自检报告.txt」发给管理员。

@@ -34,6 +34,10 @@ COLUMNS = [
     ("status", "INTEGER DEFAULT 0"),
     ("paid_at", "TEXT"),
     ("batch_id", "INTEGER"),
+    ("audit_status", "INTEGER DEFAULT 0"),
+    ("audit_at", "TEXT"),
+    ("audit_msg", "TEXT"),
+    ("audit_shot", "TEXT"),
     ("created_at", "TEXT"),
     ("updated_at", "TEXT"),
 ]
@@ -44,6 +48,11 @@ MIGRATIONS = [
     ("paid_at", "TEXT"),
     ("payee", "TEXT"),
     ("batch_id", "INTEGER"),
+    # 发票查验（2026-11 新增）
+    ("audit_status", "INTEGER DEFAULT 0"),   # 0未查验 1通过 2不通过 3无需查验
+    ("audit_at", "TEXT"),                    # 查验时间
+    ("audit_msg", "TEXT"),                   # 平台返回的说明
+    ("audit_shot", "TEXT"),                  # 结果截图相对路径
 ]
 
 # 报销单
@@ -78,9 +87,15 @@ EXCEL_HEADERS = [
     ("reimburse_date", "报销日期"),
     ("status", "报销状态"),
     ("paid_at", "报销确认时间"),
+    ("audit_status", "查验状态"),
+    ("audit_at", "查验时间"),
+    ("audit_msg", "查验说明"),
     ("note", "备注"),
     ("created_at", "登记时间"),
 ]
+
+# 查验状态 → 中文
+AUDIT_TEXT = {0: "未查验", 1: "查验通过", 2: "查验不通过", 3: "无需查验"}
 
 
 class DuplicateError(Exception):
@@ -179,7 +194,7 @@ class Store(object):
         return dict(row) if row else None
 
     def list(self, q=None, person=None, month=None, status=None, batch_id=None,
-             sort="invoice_date", desc=True, limit=5000):
+             audit=None, sort="invoice_date", desc=True, limit=5000):
         where, args = [], []
         if q:
             like = "%" + q.strip() + "%"
@@ -198,6 +213,12 @@ class Store(object):
         if status in (0, 1, "0", "1"):
             where.append("COALESCE(i.status, 0) = ?")
             args.append(int(status))
+        if audit in (0, 1, 2, 3, "0", "1", "2", "3"):
+            where.append("COALESCE(i.audit_status, 0) = ?")
+            args.append(int(audit))
+        elif str(audit) == "unchecked":
+            # 未查验 + 查验失败（可以重查的）
+            where.append("COALESCE(i.audit_status, 0) IN (0, 2)")
         if batch_id not in (None, "", "all"):
             if str(batch_id) == "none":
                 where.append("i.batch_id IS NULL")
@@ -256,6 +277,12 @@ class Store(object):
                 "  GROUP BY b.id)"
             ).fetchone()
             out["batches"] = row["c"]
+            # 查验结果分布（前端顶栏/徽章用）
+            aud = {0: 0, 1: 0, 2: 0, 3: 0}
+            for r in conn.execute(
+                    "SELECT COALESCE(audit_status,0) s, COUNT(*) c FROM invoices GROUP BY s"):
+                aud[int(r[0] or 0)] = int(r["c"])
+            out["audit"] = aud
         return out
 
     def set_status(self, rid, status):
@@ -269,6 +296,36 @@ class Store(object):
             )
         self.sync_excel()
         return self.get(rid)
+
+    def set_audit(self, rid, status, msg=None, shot=None):
+        """
+        写回查验结果。
+        status：0 未查验 / 1 查验通过 / 2 查验不通过 / 3 无需查验
+        shot  ：结果截图的相对路径（相对项目根目录）
+        """
+        status = int(status or 0)
+        stamp = now_str()
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE invoices SET audit_status = ?, audit_at = ?, "
+                "audit_msg = ?, audit_shot = ?, updated_at = ? WHERE id = ?",
+                (status, stamp, (msg or None), shot, stamp, rid)
+            )
+        self.sync_excel()
+        return self.get(rid)
+
+    def clear_audit(self, ids=None):
+        """清空查验结果（重新查验前用）。ids 为空表示全部清空。"""
+        ids = [int(x) for x in (ids or [])]
+        sql = ("UPDATE invoices SET audit_status = 0, audit_at = NULL, "
+               "audit_msg = NULL, audit_shot = NULL, updated_at = ?")
+        args = [now_str()]
+        if ids:
+            sql += " WHERE id IN (%s)" % ",".join("?" for _ in ids)
+            args.extend(ids)
+        with self._conn() as conn:
+            conn.execute(sql, args)
+        self.sync_excel()
 
     def persons(self):
         with self._conn() as conn:
@@ -680,10 +737,13 @@ class Store(object):
                 v = rec.get(key)
                 if key == "status":
                     v = "已报销" if v else "未报销"
+                elif key == "audit_status":
+                    v = AUDIT_TEXT.get(int(v or 0), "未查验")
                 ws.cell(row=r, column=c, value=v)
                 if key in ("amount", "amount_net", "tax") and v is not None:
                     ws.cell(row=r, column=c).number_format = "#,##0.00"
-        widths = [18, 24, 12, 15, 13, 10, 32, 26, 22, 10, 10, 12, 10, 20, 26, 20]
+        widths = [18, 24, 12, 15, 13, 10, 32, 26, 22, 10, 10, 12, 10, 20,
+                  12, 20, 30, 26, 20]
         for i, w in enumerate(widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
         ws.freeze_panes = "A2"

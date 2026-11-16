@@ -154,6 +154,53 @@ for k in ("程序/server.py", "程序/store.py", "程序/reader.py",
     w("  %-22s %s" % (k, ("%d 字节" % os.path.getsize(p)) if os.path.isfile(p) else "【缺失！】"))
 
 w("")
+w("【8-1】发票查验组件（网页上「查验发票」功能要用）")
+KEY_AUDIT = [
+    "程序/audit.py",
+    "程序/审核/__init__.py",
+    "程序/审核/captcha.py",
+    "程序/审核/color_parse.py",
+    "程序/审核/extractor.py",
+    "程序/审核/模型/old/inference.onnx",
+    "程序/审核/模型/old/ppocrv5_dict.txt",
+    "程序/审核/模型/new/inference.onnx",
+    "程序/审核/模型/new/ppocrv5_dict.txt",
+    "数据/查验配置.json",
+]
+miss_audit = []
+for k in KEY_AUDIT:
+    p = path(*k.split("/"))
+    if os.path.isfile(p):
+        w("  %-46s 存在  %8.2f MB" % (k, os.path.getsize(p) / 1048576.0))
+    else:
+        w("  %-46s 【缺失！】" % k)
+        miss_audit.append(k)
+
+w("")
+w("  查验用到的 Python 组件：")
+for mod in ("rapidocr", "onnxruntime", "numpy", "PIL", "playwright"):
+    try:
+        __import__(mod)
+        w("    %-12s 成功" % mod)
+    except Exception as e:
+        w("    %-12s 【失败】%s: %s" % (mod, type(e).__name__, e))
+
+w("")
+w("  查验用的浏览器（chromium）：")
+try:
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as _pw:
+        _exe = _pw.chromium.executable_path
+    if os.path.isfile(_exe):
+        w("    已安装：%s" % _exe)
+    else:
+        w("    【缺失】找不到 %s" % _exe)
+        w("    解决办法：命令行执行一次  python -m playwright install chromium")
+except Exception as e:
+    w("    检查失败：%r" % (e,))
+    w("    若提示缺少 playwright，请先  python -m pip install playwright 再重跑本自检")
+
+w("")
 w("【9】系统 Python 里有没有 pymupdf（备用方案用）")
 try:
     import importlib.util

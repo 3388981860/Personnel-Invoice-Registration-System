@@ -22,6 +22,8 @@ CN_BIG = {"万": 10000, "亿": 100000000}
 
 RE_INVOICE_NO_LINE = re.compile(r"发票号码[:：]?\s*(\d{20})")
 RE_INVOICE_NO_ANY = re.compile(r"(?<!\d)(\d{20})(?!\d)")
+RE_CODE_LINE = re.compile(r"发票代码[:：]?\s*(\d{10,12})")
+RE_CHECK_LINE = re.compile(r"校验码[:：]?\s*(\d{20})")
 RE_DATE_CN_LINE = re.compile(r"开票日期[:：]?\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日")
 RE_DATE_CN_ANY = re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s{0,4}(\d{1,2})\s*日")
 RE_MONEY = re.compile(r"[¥￥]\s*([\d,]+\.\d{2})|(?<![\d.])([\d,]{1,12}\.\d{2})(?![\d])")
@@ -134,6 +136,8 @@ def extract_from_pdf(path):
         "seller": None,
         "buyer": None,
         "category": None,
+        "invoice_code": None,
+        "check_code": None,
         "page_count": 0,
         "text_layer": False,
         "source": None,
@@ -236,6 +240,20 @@ def _parse_lines(all_lines, line_sources, res):
         if m:
             res["invoice_no"] = m.group(1)
             res["source"] = "PDF文字"
+            break
+
+    # ---------- 发票代码 / 校验码（老版发票查验时要用） ----------
+    for ln in all_lines:
+        s = _squeeze(ln)
+        if not res["invoice_code"]:
+            m = RE_CODE_LINE.search(s)
+            if m:
+                res["invoice_code"] = m.group(1)
+        if not res["check_code"]:
+            m = RE_CHECK_LINE.search(s)
+            if m:
+                res["check_code"] = m.group(1)
+        if res["invoice_code"] and res["check_code"]:
             break
 
     # ---------- 开票日期 ----------
@@ -406,7 +424,8 @@ def extract_from_ofd(path):
     res = {
         "invoice_no": None, "invoice_date": None, "amount": None,
         "amount_net": None, "tax": None, "seller": None, "buyer": None,
-        "category": None, "page_count": 0, "text_layer": False,
+        "category": None, "invoice_code": None, "check_code": None,
+        "page_count": 0, "text_layer": False,
         "source": None, "warnings": [],
     }
     try:
@@ -425,6 +444,12 @@ def extract_from_ofd(path):
         if m:
             res["invoice_no"] = m.group(1)
             res["source"] = "OFD"
+        m = RE_CODE_LINE.search(full)
+        if m:
+            res["invoice_code"] = m.group(1)
+        m = RE_CHECK_LINE.search(full)
+        if m:
+            res["check_code"] = m.group(1)
         m = RE_DATE_CN_ANY.search(full)
         if m:
             res["invoice_date"] = "%04d-%02d-%02d" % (int(m.group(1)), int(m.group(2)), int(m.group(3)))

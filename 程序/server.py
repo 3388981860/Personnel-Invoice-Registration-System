@@ -8,6 +8,7 @@
     3. 关闭本窗口即退出系统
 """
 import base64
+import datetime
 import json
 import mimetypes
 import os
@@ -64,8 +65,10 @@ sys.path.insert(0, APP_DIR)
 
 import reader      # noqa: E402
 import store as store_mod  # noqa: E402
+import audit as audit_mod  # noqa: E402
 
 STORE = store_mod.Store(BASE)
+AUDIT_RUNNER = audit_mod.Runner(STORE)
 APP_TAG = "invoice-book"
 
 DEFAULT_PORT = 8765
@@ -151,6 +154,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._api_export()
             if path == "/api/openfolder":
                 return self._api_openfolder(qs)
+            if path == "/api/audit/status":
+                return self._api_audit_status()
+            if path == "/api/audit/shot":
+                return self._api_audit_shot(qs)
             return self._err("未知地址", 404)
         except Exception:
             traceback.print_exc()
@@ -192,7 +199,7 @@ class Handler(BaseHTTPRequestHandler):
             return v[0] if v else None
         records = STORE.list(
             q=one("q"), person=one("person"), month=one("month"),
-            status=one("status"), batch_id=one("batch"),
+            status=one("status"), batch_id=one("batch"), audit=one("audit"),
             sort=one("sort") or "invoice_date",
             desc=(one("desc") or "1") != "0",
         )
@@ -300,6 +307,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._api_status()
             if path == "/api/openfile":
                 return self._api_openfile()
+            if path == "/api/audit/start":
+                return self._api_audit_start()
+            if path == "/api/audit/stop":
+                return self._api_audit_stop()
             return self._err("未知地址", 404)
         except Exception:
             traceback.print_exc()
@@ -551,6 +562,84 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             return self._err("打开失败：%s" % exc)
         return self._json({"ok": True})
+
+    # ------------------------------------------------------------------
+    # 发票查验
+    # ------------------------------------------------------------------
+    def _api_audit_status(self):
+        return self._json({
+            "ok": True,
+            "state": AUDIT_RUNNER.snapshot(),
+            "stats": STORE.stats(),
+            "config": {
+                "page_version": audit_mod.CONFIG["page_version"],
+                "headless": audit_mod.CONFIG["headless"],
+                "model_ready": audit_mod.model_ready(),
+            },
+        })
+
+    def _pick_audit_ids(self, data):
+        """挑出要查验的发票：给了 ids 就按 ids，否则按范围挑。"""
+        ids = data.get("ids") or []
+        if ids:
+            out = []
+            for x in ids:
+                try:
+                    out.append(int(x))
+                except (TypeError, ValueError):
+                    continue
+            return out
+
+        scope = (data.get("scope") or "unchecked").strip()
+        out = []
+        for r in STORE.list(limit=100000):
+            st = int(r.get("audit_status") or 0)
+            if scope == "all":
+                out.append(r["id"])
+            elif scope == "failed":
+                if st == 2:
+                    out.append(r["id"])
+            elif scope == "unpaid":
+                if int(r.get("status") or 0) == 0:
+                    out.append(r["id"])
+            else:                       # unchecked：未查验 + 查验失败
+                if st in (0, 2):
+                    out.append(r["id"])
+        return out
+
+    def _api_audit_start(self):
+        data = self._json_body()
+        try:
+            ids = self._pick_audit_ids(data)
+        except Exception as exc:
+            return self._err("挑选待查验发票失败：%s" % exc, 500)
+        if not ids:
+            return self._err("没有需要查验的发票")
+        ok, msg = AUDIT_RUNNER.start(ids)
+        if not ok:
+            return self._err(msg, 409)
+        return self._json({"ok": True, "count": len(ids),
+                           "state": AUDIT_RUNNER.snapshot()})
+
+    def _api_audit_stop(self):
+        AUDIT_RUNNER.stop()
+        return self._json({"ok": True, "state": AUDIT_RUNNER.snapshot()})
+
+    def _api_audit_shot(self, qs):
+        rid = (qs.get("id") or [""])[0]
+        rec = STORE.get(int(rid)) if rid.isdigit() else None
+        rel = (rec or {}).get("audit_shot")
+        if not rel:
+            return self._err("这张发票还没有查验截图", 404)
+        base = os.path.abspath(os.path.join(BASE, "数据", "查验截图"))
+        path = os.path.abspath(os.path.join(BASE, rel))
+        if not path.startswith(base + os.sep):
+            return self._err("路径不合法", 400)
+        if not os.path.isfile(path):
+            return self._err("截图文件不在了", 404)
+        with open(path, "rb") as f:
+            data = f.read()
+        return self._send(200, data, "image/png")
 
 
 # ----------------------------------------------------------------------

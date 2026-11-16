@@ -1,0 +1,853 @@
+# -*- coding: utf-8 -*-
+"""
+发票查验
+--------
+把台账里的发票逐张送到「国家税务总局全国增值税发票查验平台」核验，
+并把结果和结果截图写回台账。
+
+设计要点：
+    1. 纯逻辑，不依赖 tkinter；由 server.py 的后台线程调用
+    2. 截图用 Playwright 元素截图，不再用 ImageGrab 抓屏，
+       因此与显示器分辨率、DPI 缩放、浏览器窗口位置无关
+    3. 查验结果落库（audit_status / audit_at / audit_msg / audit_shot），
+       前端可以查、可以看截图
+    4. 同一时间只跑一个任务，避免把平台的识别次数配额一次烧光
+"""
+import base64
+import json
+import os
+import re
+import threading
+import time
+import traceback
+import uuid
+from datetime import datetime
+from io import BytesIO
+
+import reader
+
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LIB_DIR = os.path.join(BASE, "运行库")
+AUDIT_DIR = os.path.dirname(os.path.abspath(__file__))          # 程序
+CAPTCHA_DIR = os.path.join(AUDIT_DIR, "审核")                    # 程序\审核
+MODEL_DIR = os.path.join(CAPTCHA_DIR, "模型")                    # 程序\审核\模型
+SHOT_DIR = os.path.join(BASE, "数据", "查验截图")
+TEMP_DIR = os.path.join(BASE, "数据", "临时")
+
+
+def _browser_dir_ready(path):
+    """
+    只有目录里真的放了 chromium-* 才算"自带浏览器"。
+    空目录也会被 Playwright 当成浏览器根目录，结果反而找不到浏览器，
+    所以这里必须看有没有 chromium-* 子目录，不能只看目录在不在。
+    """
+    try:
+        return any(name.startswith("chromium-") and
+                   os.path.isdir(os.path.join(path, name))
+                   for name in os.listdir(path))
+    except OSError:
+        return False
+
+
+# 自带浏览器优先（换电脑拷走就能用）；没放就交给 Playwright 用系统默认位置
+_BROWSERS = os.path.join(LIB_DIR, "playwright_browsers")
+if _browser_dir_ready(_BROWSERS):
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _BROWSERS
+
+# 查验状态
+AUDIT_NONE = 0        # 未查验（含查验失败，可重试）
+AUDIT_PASS = 1        # 查验通过
+AUDIT_FAIL = 2        # 查验不通过（平台查无此票 / 信息不一致）
+AUDIT_SKIP = 3        # 不查验（超过 5 年等）
+
+CONFIG = {
+    # 2026-11 实测：平台首页已整体改版为 TDesign 单页应用
+    # （两个入口都会跳到 /fpcygzfw/national-invoice-check），
+    # 旧版那套 #fpdm / #fphm 选择器已经全部匹配不到，必须用 new。
+    "page_version": "new",     # new=新版页面（当前有效）  old=旧版页面（已失效，留档）
+    "headless": False,         # 需要人工兜底验证码时保持有界面
+    "window_position": "-10,0",
+    "viewport_width": 1400,
+    "viewport_height": 900,
+    "interval": 3,             # 每张发票之间的间隔（秒）
+    "retries": 2,              # 单张发票整体重试次数
+    "captcha_tries": 6,        # 连续识别不出验证码时的尝试次数
+    "captcha_rounds": 4,       # 验证码被平台判错后，最多重来几轮
+    "browser_path": "",        # 指定 chrome.exe 全路径；留空=用 Playwright 自己找
+}
+
+SELECTORS = {
+    "old": {
+        "url": "https://inv-veri.chinatax.gov.cn/index.html",
+        "fpdm": "#fpdm",
+        "fphm": "#fphm",
+        "kprq": "#kprq",
+        "amount": "#kjje",
+        "yzm": "#yzm",
+        "yzm_img": "#yzm_img",
+        "submit": "#checkfp",
+        "popup": "#popup_ok",
+        "captcha_resp": "yzmQuery",
+        "query_resp": "vatQuery",
+        "json_mode": "jsonp",
+        "date_picker": False,
+        "result_frame": "#dialog-body",
+        "result_content": "#content",
+    },
+    "new": {
+        # 2026-11-16 实测：两个入口都 302 到 /fpcygzfw/national-invoice-check
+        "url": "https://inv-veri.chinatax.gov.cn/index.html",
+        "fpdm": ".t-form-item__fpdm input",
+        "fphm": ".t-form-item__fphm input",
+        "kprq": ".t-form-item__kprq input",
+        "amount": ".t-form-item__kpje input",
+        "yzm": ".t-form-item__yzm input",
+        "yzm_img": ".t-form-item__ img",
+        "submit": "button[type='submit']",
+        # 提示弹窗（TDesign）与它的"确定"按钮
+        "popup": ".popup-content",
+        "popup_ok": ".t-dialog__ctx button",
+        "captcha_resp": "getVerifyCode",
+        "query_resp": "queryFpcyxx",
+        "json_mode": "json",
+        "date_picker": False,      # 新版可以直接输入 YYYYMMDD
+        "result": ".invoice-dialog",   # 查验结果弹窗
+    },
+}
+
+
+# ----------------------------------------------------------------------
+# 小工具
+# ----------------------------------------------------------------------
+def _digits(s):
+    return re.sub(r"\D", "", str(s or ""))
+
+
+def _compact_date(s):
+    d = _digits(s)
+    return d[:8] if len(d) >= 8 else ""
+
+
+def _load_config():
+    path = os.path.join(BASE, "数据", "查验配置.json")
+    if not os.path.isfile(path):
+        return
+    try:
+        # utf-8-sig：记事本另存为 UTF-8 会带 BOM，用 utf-8 读会直接解析失败
+        with open(path, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        for k in CONFIG:
+            if k in data:
+                CONFIG[k] = data[k]
+    except Exception:
+        traceback.print_exc()
+
+
+_load_config()
+
+
+def model_dir(version=None):
+    """
+    返回某个页面版本的验证码模型目录。
+    该版本没放模型时退回 old，避免"选了新版但只放了一套模型"直接哑火。
+    """
+    version = version or CONFIG["page_version"]
+    for name in (version, "old"):
+        d = os.path.join(MODEL_DIR, name)
+        if os.path.isfile(os.path.join(d, "inference.onnx")):
+            return d
+    return os.path.join(MODEL_DIR, version)
+
+
+def model_ready(version=None):
+    return os.path.isfile(os.path.join(model_dir(version), "inference.onnx"))
+
+
+def shot_rel_path(invoice_no, when=None):
+    """截图相对路径：数据\\查验截图\\年\\月\\发票号码.png"""
+    when = when or datetime.now()
+    return os.path.join("数据", "查验截图", when.strftime("%Y"), when.strftime("%m"),
+                        "%s.png" % _digits(invoice_no))
+
+
+# ----------------------------------------------------------------------
+# 取查验用的参数
+# ----------------------------------------------------------------------
+def _ocr_image(img_path):
+    """图片型发票：OCR 兜底取 发票代码 / 校验码 / 金额。"""
+    from 审核.extractor import InvoiceExtractor
+    ex = InvoiceExtractor()
+    f = ex.extract_fields(img_path) or {}
+    return {
+        "invoice_code": f.get("fpdm"),
+        "check_code": f.get("jym"),
+        "amount": f.get("kpje"),
+        "amount_other": f.get("qtje") or [],
+    }
+
+
+def _ocr_pdf(pdf_path):
+    """没有文字层的 PDF：把首页渲染成图片再 OCR。"""
+    fitz = reader.import_fitz()
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    tmp = os.path.join(TEMP_DIR, "audit_%s.png" % uuid.uuid4().hex)
+    doc = fitz.open(pdf_path)
+    try:
+        pix = doc[0].get_pixmap(dpi=220)
+        pix.save(tmp)
+    finally:
+        doc.close()
+    try:
+        return _ocr_image(tmp)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _source_fields(record):
+    """从归档原件里补台账没有的字段（发票代码、校验码、金额）。"""
+    out = {}
+    rel = record.get("file_rel")
+    if not rel:
+        return out
+    path = os.path.join(BASE, rel)
+    if not os.path.isfile(path):
+        return out
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        if ext in (".pdf", ".ofd"):
+            f = reader.extract(path)
+            out["invoice_code"] = f.get("invoice_code")
+            out["check_code"] = f.get("check_code")
+            out["amount"] = f.get("amount")
+            if ext == ".pdf" and not f.get("text_layer"):
+                out.update(_ocr_pdf(path))
+        else:
+            out.update(_ocr_image(path))
+    except Exception:
+        traceback.print_exc()
+    return out
+
+
+def _money_str(v):
+    """金额统一成两位小数：344.0 → 344.00，避免平台按不同格式校验。"""
+    try:
+        return "%.2f" % float(v)
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def build_query(record, src=None):
+    """
+    由台账记录生成平台查询参数。
+    返回 (query, msg, skip)：
+        query 为 dict 表示可以查验；为 None 时 msg 说明原因；
+        skip=True 表示这类票平台本来就不给查（比如超过 5 年）。
+
+    金额口径（2026-11 实测）：
+        20 位数电票 → 平台要"价税合计"      → 用台账 amount
+        12 位代码老票 → 平台要校验码后 6 位  → 用原件里的 check_code
+        10 位代码老票 → 平台要"开具金额(不含税)" → 用原件 OCR 到的金额
+    """
+    no = _digits(record.get("invoice_no"))
+    if len(no) not in (20, 8):
+        return None, "发票号码是 %d 位，平台只接受 20 位（数电票）或 8 位（老票）" % len(no), True
+
+    kprq = _compact_date(record.get("invoice_date"))
+    if not kprq:
+        return None, "缺少开票日期，无法查验", False
+
+    # 超过 5 年平台不提供查验
+    try:
+        d = datetime.strptime(kprq, "%Y%m%d")
+        now = datetime.now()
+        try:
+            five = now.replace(year=now.year - 5)
+        except ValueError:
+            five = now.replace(year=now.year - 5, day=28)
+        if d <= five:
+            return None, "开票时间超过 5 年，平台不提供查验", True
+    except ValueError:
+        return None, "开票日期格式不对，无法查验", False
+
+    src = src if src is not None else _source_fields(record)
+    fpdm = _digits(src.get("invoice_code"))
+    check = _digits(src.get("check_code"))
+    amount = record.get("amount")
+    if amount in (None, ""):
+        amount = src.get("amount")
+
+    q = {"fphm": no, "kprq": kprq, "fpdm": "", "amount": "", "role": ""}
+
+    if len(no) == 20:
+        # 数电票：只填号码 + 日期 + 价税合计
+        if amount in (None, ""):
+            return None, "缺少价税合计金额，无法查验", False
+        q["amount"] = _money_str(amount)
+        q["role"] = "total"
+        return q, "", False
+
+    # 8 位号码的老票：必须带发票代码
+    if len(fpdm) == 12:
+        if len(check) < 6:
+            return None, "这张老票要校验码后 6 位，但原件里没读到校验码", False
+        q["fpdm"] = fpdm
+        q["amount"] = check[-6:]
+        q["role"] = "check"
+    elif len(fpdm) == 10:
+        other = src.get("amount_other") or []
+        q["fpdm"] = fpdm
+        q["amount"] = _money_str(other[0]) if other else _money_str(amount or "")
+        q["role"] = "other"
+        if not q["amount"]:
+            return None, "缺少开具金额，无法查验", False
+    else:
+        return None, "8 位号码的老票必须同时有 10/12 位发票代码，原件里没读到", True
+    return q, "", False
+
+
+# ----------------------------------------------------------------------
+# 验证码
+# ----------------------------------------------------------------------
+def _parse_body(text):
+    """平台的验证码接口旧版返回 jsonp，新版返回 json。"""
+    text = (text or "").strip()
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    try:
+        return json.loads(text[text.index("(") + 1:text.rindex(")")])
+    except Exception:
+        return {}
+
+
+def _base64_to_image(b64, path):
+    data = base64.b64decode(b64)
+    from PIL import Image
+    Image.open(BytesIO(data)).save(path)
+
+
+def _solve_captcha(page, sel, recognizer, color_parser):
+    """
+    抓一张验证码并识别，返回识别文本（识别不可靠时返回空串）。
+
+    2026-11 实测：新版平台点验证码图片会 POST getVerifyCode（跨域，省级节点），
+    返回 JSON 里的 key3 就是颜色码（00黑 01红 02黄 03蓝），key1 是图片 base64。
+    """
+    # 有校验弹窗（比如"请输入发票号码!"）时先关掉，否则点不到图片
+    _dismiss_popup(page, sel)
+
+    try:
+        with page.expect_response(lambda r: sel["captcha_resp"] in r.url,
+                                  timeout=20000) as info:
+            page.locator(sel["yzm_img"]).first.click(timeout=6000)
+    except Exception:
+        return ""
+    data = _parse_body(info.value.text())
+
+    if sel["json_mode"] == "jsonp":
+        img_b64, color = data.get("key1"), data.get("key4")
+    else:
+        img_b64, color = data.get("key1"), data.get("key3")
+    if not img_b64:
+        return ""
+
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    stamp = uuid.uuid4().hex
+    raw = os.path.join(TEMP_DIR, "%s.png" % stamp)
+    filtered = os.path.join(TEMP_DIR, "%s.filter.png" % stamp)
+    try:
+        _base64_to_image(img_b64, raw)
+        from PIL import Image
+        img = Image.open(raw)
+        bg = color_parser.get_most_common_color(img)
+        if bg:
+            img = color_parser.remove_background_color(img, bg)
+        color_parser.filter_by_color(img, str(color or "00")).save(filtered)
+        result = json.loads(recognizer.infer_json(filtered))
+        if result.get("scores", 0) < 0.99:
+            return ""
+        return result.get("txts", "")
+    except Exception:
+        traceback.print_exc()
+        return ""
+    finally:
+        for p in (raw, filtered):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
+def _select_date(page, date_str):
+    """旧版新版页面曾经用过日期选择面板；现在可直接输入，此函数留作兜底。"""
+    date_input = page.locator(".t-form-item__kprq input")
+    date_input.click()
+    panel = page.locator(".t-date-picker__panel-container")
+    panel.wait_for(state="visible", timeout=10000)
+
+    year, month, day = date_str[:4], date_str[4:6], date_str[6:8]
+
+    year_selector = panel.locator(".t-date-picker__header-controller-year .t-input__inner")
+    if year_selector.input_value() != year:
+        year_selector.click()
+        panel.locator(".t-date-picker__header-controller-year-popup").wait_for(
+            state="visible", timeout=5000)
+        panel.locator('.t-select__list .t-select-option:has-text("%s")' % year).first.click()
+
+    target_month = "%d 月" % int(month)
+    month_selector = panel.locator(".t-date-picker__header-controller-month .t-input__inner")
+    if month_selector.input_value() != target_month:
+        month_selector.click()
+        panel.locator(".t-date-picker__header-controller-month-popup").wait_for(
+            state="visible", timeout=5000)
+        panel.locator('.t-select__list .t-select-option:has-text("%s")' % target_month).first.click()
+
+    cell = (panel.locator(".t-date-picker__cell:not(.t-date-picker__cell--disabled)"
+                          ":not(.t-date-picker__cell--additional)")
+            .get_by_text(str(int(day)), exact=True))
+    cell.wait_for(state="visible", timeout=5000)
+    cell.first.click()
+
+
+# ----------------------------------------------------------------------
+# 平台弹窗（校验提示 / 查验结果）
+# ----------------------------------------------------------------------
+def _popup_text(page, sel):
+    """读平台"提示"弹窗的文案；没有就返回空串。"""
+    try:
+        loc = page.locator(sel.get("popup") or ".popup-content")
+        if loc.count() and loc.first.is_visible():
+            return (loc.first.inner_text(timeout=3000) or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _dismiss_popup(page, sel):
+    """关掉校验提示弹窗。查验结果弹窗不要动（要留着截图）。"""
+    try:
+        if page.locator(sel.get("result") or ".invoice-dialog").count():
+            return False
+        if not _popup_text(page, sel):
+            return False
+        page.locator(sel.get("popup_ok") or ".t-dialog__ctx button").first.click(timeout=3000)
+        time.sleep(0.4)
+        return True
+    except Exception:
+        return False
+
+
+def _result_ready(page, sel):
+    try:
+        loc = page.locator(sel.get("result") or ".invoice-dialog")
+        return loc.count() > 0 and loc.first.is_visible()
+    except Exception:
+        return False
+
+
+def _result_text(page, sel):
+    """查验结果弹窗里的完整文字。"""
+    try:
+        return page.locator(sel.get("result") or ".invoice-dialog").first.inner_text(timeout=8000)
+    except Exception:
+        return ""
+
+
+# ----------------------------------------------------------------------
+# 截图
+# ----------------------------------------------------------------------
+def _img_ok(path):
+    if not os.path.isfile(path) or os.path.getsize(path) < 3000:
+        return False
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return im.width > 200 and im.height > 100
+    except Exception:
+        return False
+
+
+def _capture(page, sel, out_path):
+    """优先截查验结果弹窗，失败再退回整页截图。"""
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    # 右下角"提示"浮层会挡住发票备注栏，截图前先藏起来（只影响这一张截图）
+    try:
+        page.evaluate("""() => {
+            document.querySelectorAll('.com-bottom-tips').forEach(el => {
+                el.style.display = 'none';
+            });
+        }""")
+    except Exception:
+        pass
+    candidates = []
+    for css in (sel.get("result") or ".invoice-dialog",
+                ".invoice-dialog",
+                ".t-dialog__body",
+                "[class*='dialog'] [class*='content']"):
+        try:
+            candidates.append(page.locator(css).first)
+        except Exception:
+            pass
+
+    for loc in candidates:
+        try:
+            if loc.count() == 0 or not loc.is_visible():
+                continue
+            loc.screenshot(path=out_path, timeout=20000)
+            if _img_ok(out_path):
+                return True
+        except Exception:
+            continue
+    try:
+        page.screenshot(path=out_path, full_page=True)
+        return _img_ok(out_path)
+    except Exception:
+        return False
+
+
+# CyjgDm = 查验结果代码。已实测：7=信息一致，97=验证码错误。
+CYJG_PASS = {"7"}
+CYJG_CAPTCHA_BAD = {"97"}
+CYJG_FAIL = {"3", "4", "5", "6"}     # 不一致 / 查无此票 等（按文案兜底）
+FAIL_WORDS = ("不一致", "查无此票", "不存在", "作废", "失败", "不符")
+
+
+# ----------------------------------------------------------------------
+# 单张发票查验
+# ----------------------------------------------------------------------
+def _fill_form(page, query, sel):
+    """填表。返回 (ok, msg)。平台会对空字段弹"请输入发票号码!"之类提示。"""
+    try:
+        if query.get("fpdm"):
+            page.locator(sel["fpdm"]).fill(query["fpdm"], timeout=15000)
+        else:
+            # 数电票没有发票代码，先把这一格清空，避免上一张的残留
+            try:
+                if page.locator(sel["fpdm"]).count():
+                    page.locator(sel["fpdm"]).fill("", timeout=5000)
+            except Exception:
+                pass
+        page.locator(sel["fphm"]).fill(query["fphm"], timeout=15000)
+        page.locator(sel["kprq"]).fill(query["kprq"], timeout=15000)
+        page.locator(sel["amount"]).fill(str(query["amount"]), timeout=15000)
+        # 让页面完成校验（TDesign 会在 blur 后校验日期/金额格式）
+        try:
+            page.locator(sel["yzm"]).click(timeout=3000)
+        except Exception:
+            pass
+        time.sleep(0.4)
+    except Exception as exc:
+        return False, "填表失败：%s" % str(exc)[:120]
+
+    msg = _popup_text(page, sel)
+    if msg:
+        _dismiss_popup(page, sel)
+        return False, "平台提示：%s" % msg
+    return True, ""
+
+
+def _submit(page, sel):
+    """点查验并等查询响应。返回 (data, error)。"""
+    btn = page.locator(sel["submit"]).first
+    # 必填项没齐时按钮是 disabled，直接点会一直卡到超时
+    for _ in range(30):
+        try:
+            if btn.is_enabled():
+                break
+        except Exception:
+            pass
+        time.sleep(0.3)
+    else:
+        msg = _popup_text(page, sel)
+        _dismiss_popup(page, sel)
+        return None, msg or "查验按钮一直不可点（必填项可能没填齐）"
+
+    try:
+        with page.expect_response(lambda r: sel["query_resp"] in r.url,
+                                  timeout=60000) as info:
+            btn.click(timeout=15000)
+    except Exception as exc:
+        msg = _popup_text(page, sel)
+        _dismiss_popup(page, sel)
+        return None, msg or ("没等到查询响应：%s" % str(exc)[:100])
+    return _parse_body(info.value.text()), ""
+
+
+def _judge(data):
+    """
+    按平台返回判定。
+    返回 (status, msg)。
+    """
+    resp = data.get("Response") if isinstance(data.get("Response"), dict) else {}
+    d = resp.get("Data") if isinstance(resp.get("Data"), dict) else {}
+    code = str(d.get("CyjgDm") or "")
+    msg = str(d.get("CyjgMsg") or "").strip()
+
+    if code in CYJG_CAPTCHA_BAD or "验证码" in msg:
+        return None, msg or "验证码错误"
+    if code in CYJG_PASS or ("一致" in msg and "不一致" not in msg):
+        return AUDIT_PASS, msg or "查验通过"
+    if code in CYJG_FAIL or any(w in msg for w in FAIL_WORDS):
+        return AUDIT_FAIL, msg or "查验不通过"
+    if not code and not msg:
+        return AUDIT_NONE, "平台没有返回查验结果"
+    return AUDIT_NONE, "未识别的查验结果：%s" % (msg or code)
+
+
+def _verify_once(page, query, sel, recognizer, color_parser):
+    """返回 (status, msg, result_text)"""
+    page.goto(sel["url"], wait_until="domcontentloaded", timeout=60000)
+    page.set_viewport_size({"width": CONFIG["viewport_width"],
+                            "height": CONFIG["viewport_height"]})
+
+    # 等表单渲染完（单页应用，DOM 是异步出来的）
+    try:
+        page.locator(sel["fphm"]).first.wait_for(state="visible", timeout=30000)
+    except Exception:
+        return AUDIT_NONE, "查验平台没有打开（表单没出来，可能是网络或改版）", ""
+
+    ok, msg = _fill_form(page, query, sel)
+    if not ok:
+        return AUDIT_NONE, msg, ""
+
+    for _round in range(CONFIG["captcha_rounds"]):
+        text = ""
+        for _ in range(CONFIG["captcha_tries"]):
+            text = _solve_captcha(page, sel, recognizer, color_parser)
+            if text:
+                break
+            time.sleep(0.8)
+        if not text:
+            return AUDIT_NONE, "验证码连续识别失败", ""
+
+        try:
+            page.locator(sel["yzm"]).fill(text, timeout=10000)
+        except Exception:
+            return AUDIT_NONE, "验证码填不进去", ""
+
+        data, err = _submit(page, sel)
+        if data is None:
+            return AUDIT_NONE, err, ""
+
+        status, msg = _judge(data)
+        if status is None:          # 验证码错了，再来一轮
+            # 只关弹窗，不主动刷新：下一轮 _solve_captcha 自己会点图片，
+            # 这里多点一次会让"抓到的验证码"和"页面显示的验证码"错位。
+            _dismiss_popup(page, sel)
+            time.sleep(1.5)
+            continue
+
+        if status != AUDIT_PASS:
+            return status, msg, ""
+
+        # 通过：等结果弹窗出来，拿文字 + 截图
+        for _ in range(20):
+            if _result_ready(page, sel):
+                break
+            time.sleep(0.3)
+        body = _result_text(page, sel)
+        return AUDIT_PASS, msg, body
+
+    return AUDIT_NONE, "验证码多次不正确", ""
+
+
+def _first_hit(text):
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if line and any(w in line for w in FAIL_WORDS):
+            return line[:60]
+    return "平台提示信息不一致"
+
+
+# ----------------------------------------------------------------------
+# 后台任务
+# ----------------------------------------------------------------------
+class Runner(object):
+    def __init__(self, store):
+        self.store = store
+        self.lock = threading.Lock()
+        self.thread = None
+        self.stop_flag = threading.Event()
+        self.state = self._empty()
+
+    @staticmethod
+    def _empty():
+        return {
+            "running": False, "total": 0, "done": 0,
+            "ok": 0, "fail": 0, "skip": 0,
+            "current": "", "current_no": "",
+            "log": [], "error": None,
+            "started_at": None, "finished_at": None,
+        }
+
+    # ---------------- 对外 ----------------
+    def snapshot(self):
+        with self.lock:
+            s = dict(self.state)
+            s["log"] = list(self.state["log"])
+        return s
+
+    def start(self, ids):
+        with self.lock:
+            if self.state["running"]:
+                return False, "已有查验任务在运行，请等它结束"
+            records = [self.store.get(int(i)) for i in ids]
+            records = [r for r in records if r]
+            if not records:
+                return False, "没有可查验的发票"
+            self.stop_flag.clear()
+            self.state = self._empty()
+            self.state["running"] = True
+            self.state["total"] = len(records)
+            self.state["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.thread = threading.Thread(target=self._run, args=(records,), daemon=True)
+            self.thread.start()
+        return True, ""
+
+    def stop(self):
+        self.stop_flag.set()
+        with self.lock:
+            self._log_locked("收到停止指令，当前这张处理完就停")
+
+    # ---------------- 内部 ----------------
+    def _log(self, text):
+        with self.lock:
+            self._log_locked(text)
+
+    def _log_locked(self, text):
+        self.state["log"].append({
+            "t": time.strftime("%H:%M:%S"),
+            "text": text,
+        })
+        if len(self.state["log"]) > 300:
+            self.state["log"] = self.state["log"][-300:]
+
+    def _bump(self, field, n=1):
+        with self.lock:
+            self.state[field] = self.state.get(field, 0) + n
+
+    def _run(self, records):
+        recognizer = color_parser = None
+        try:
+            from playwright.sync_api import sync_playwright
+            from 审核.captcha import CaptchaRecognizer
+            from 审核.color_parse import ColorParser
+
+            version = CONFIG["page_version"]
+            sel = SELECTORS.get(version, SELECTORS["old"])
+            mdir = model_dir(version)
+            if not model_ready(version):
+                self._log("验证码模型缺失：%s —— 自动识别验证码将不可用，"
+                          "只能靠人工填验证码" % mdir)
+            recognizer = CaptchaRecognizer(os.path.join(mdir, "inference.onnx"),
+                                           os.path.join(mdir, "ppocrv5_dict.txt"))
+            color_parser = ColorParser()
+
+            launch_kw = {
+                "headless": CONFIG["headless"],
+                "args": ["--window-position=%s" % CONFIG["window_position"]],
+            }
+            if CONFIG.get("browser_path"):
+                launch_kw["executable_path"] = CONFIG["browser_path"]
+
+            with sync_playwright() as p:
+                self._log("启动浏览器（%s 版页面）" % ("新" if version == "new" else "旧"))
+                try:
+                    browser = p.chromium.launch(**launch_kw)
+                except Exception as exc:
+                    self._log("浏览器启动失败：%s" % str(exc)[:300])
+                    if "playwright install" in str(exc) or "Executable doesn't exist" in str(exc) \
+                            or "chromium" in str(exc).lower():
+                        self._log("请在命令行执行一次：python -m playwright install chromium "
+                                  "（或在 数据\\查验配置.json 里用 browser_path 指定 chrome.exe）")
+                    return
+                try:
+                    for rec in records:
+                        if self.stop_flag.is_set():
+                            break
+                        self._one(browser, rec, sel, recognizer, color_parser)
+                        time.sleep(CONFIG["interval"])
+                finally:
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
+        except ImportError as exc:
+            self._log("缺少查验组件：%s —— 请在命令行执行 "
+                      "python -m pip install playwright rapidocr onnxruntime" % exc)
+        except Exception:
+            self._log("查验任务异常：\n" + traceback.format_exc()[-800:])
+        finally:
+            with self.lock:
+                self.state["running"] = False
+                self.state["current"] = ""
+                self.state["current_no"] = ""
+                self.state["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._log("任务结束：成功 %d，不通过 %d，跳过 %d" % (
+                self.state["ok"], self.state["fail"], self.state["skip"]))
+
+    def _model_ready(self):
+        return model_ready(CONFIG["page_version"])
+
+    def _one(self, browser, rec, sel, recognizer, color_parser):
+        no = rec.get("invoice_no") or ""
+        with self.lock:
+            self.state["current"] = no
+            self.state["current_no"] = no
+        self._log("开始查验 %s" % no)
+
+        try:
+            src = _source_fields(rec)
+            query, msg, skip = build_query(rec, src)
+        except Exception:
+            query, msg, skip = None, "读取原件出错", False
+
+        if not query:
+            status = AUDIT_SKIP if skip else AUDIT_NONE
+            if skip:
+                self._bump("skip")
+                self._log("跳过 %s：%s" % (no, msg))
+            else:
+                self._log("未查验 %s：%s" % (no, msg))
+            self.store.set_audit(rec["id"], status, msg, None)
+            self._bump("done")
+            return
+
+        status, msg, shot = AUDIT_NONE, "查验失败", None
+        for attempt in range(CONFIG["retries"]):
+            page = None
+            try:
+                page = browser.new_page()
+                status, msg, _body = _verify_once(page, query, sel, recognizer, color_parser)
+                if status == AUDIT_PASS:
+                    rel = shot_rel_path(no)
+                    if _capture(page, sel, os.path.join(BASE, rel)):
+                        shot = rel
+                    else:
+                        self._log("截图失败：%s" % no)
+                break
+            except Exception as exc:
+                msg = "查验出错：%s" % str(exc)[:120]
+                self._log("%s 第 %d 次出错" % (no, attempt + 1))
+            finally:
+                try:
+                    if page:
+                        page.close()
+                except Exception:
+                    pass
+
+        if status == AUDIT_PASS:
+            self._bump("ok")
+            self._log("查验通过 %s" % no)
+        elif status == AUDIT_FAIL:
+            self._bump("fail")
+            self._log("查验不通过 %s：%s" % (no, msg))
+        else:
+            self._log("未能查验 %s：%s" % (no, msg))
+
+        self.store.set_audit(rec["id"], status, msg, shot)
+        self._bump("done")
