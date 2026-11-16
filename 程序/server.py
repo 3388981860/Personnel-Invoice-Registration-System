@@ -71,6 +71,17 @@ STORE = store_mod.Store(BASE)
 AUDIT_RUNNER = audit_mod.Runner(STORE)
 APP_TAG = "invoice-book"
 
+
+def _audited_recently(stamp, days=30):
+    """查验时间在 days 天以内 → 认为不用重复查（平台配额有限）。"""
+    if not stamp:
+        return False
+    try:
+        d = datetime.datetime.strptime(str(stamp)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    return (datetime.date.today() - d).days < days
+
 DEFAULT_PORT = 8765
 ALLOWED_EXT = {".pdf", ".ofd"}
 
@@ -591,17 +602,21 @@ class Handler(BaseHTTPRequestHandler):
             return out
 
         scope = (data.get("scope") or "unchecked").strip()
+        force = bool(data.get("force"))
         out = []
         for r in STORE.list(limit=100000):
             st = int(r.get("audit_status") or 0)
-            if scope == "all":
-                out.append(r["id"])
+            if scope == "unpaid":
+                if int(r.get("status") or 0) == 0:
+                    out.append(r["id"])
             elif scope == "failed":
                 if st == 2:
                     out.append(r["id"])
-            elif scope == "unpaid":
-                if int(r.get("status") or 0) == 0:
-                    out.append(r["id"])
+            elif scope == "all":
+                # 30 天内已经查通过的就不再打扰平台（配额有限），force=true 可强制重查
+                if st == 1 and not force and _audited_recently(r.get("audit_at")):
+                    continue
+                out.append(r["id"])
             else:                       # unchecked：未查验 + 查验失败
                 if st in (0, 2):
                     out.append(r["id"])

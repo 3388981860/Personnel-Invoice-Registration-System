@@ -561,7 +561,8 @@ thead th, tbody td { overflow: hidden; text-overflow: ellipsis; }
 .grid-table thead th:nth-child(6)  { width: 104px; }  /* 报销人 */
 .grid-table thead th:nth-child(7)  { width: 114px; }  /* 收款人 */
 .grid-table thead th:nth-child(8)  { width: 132px; }  /* 报销状态 */
-.grid-table thead th:nth-child(10) { width: 116px; }  /* 操作 */
+.grid-table thead th:nth-child(9)  { width: 96px; }   /* 查验 */
+.grid-table thead th:nth-child(11) { width: 116px; }  /* 操作 */
 
 /* 勾选列：去掉内边距、去掉复选框默认外边距，否则会被省略号截成「…」 */
 .grid-table th:first-child,
@@ -655,6 +656,107 @@ tbody tr.bad .hint-cell { color: var(--danger); font-weight: 500; }
 .tag.ok { background: var(--success); }
 .tag.bad { background: var(--danger); }
 .tag.part { background: var(--warning); }
+
+/* 查验状态标签：弱化配色，避免和"报销状态"抢注意力 */
+.tag.au-none { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+.tag.au-pass { background: var(--success-soft); color: #047857; border: 1px solid var(--success-line); }
+.tag.au-fail { background: var(--danger-soft); color: #B91C1C; border: 1px solid var(--danger-line); }
+.tag.au-skip { background: #F1F5F9; color: var(--muted-2); border: 1px solid var(--border); }
+
+/* 查验结果截图 */
+.au-shot {
+    display: block;
+    margin-top: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-ctl);
+    max-width: 100%;
+    cursor: zoom-in;
+    background: var(--surface-2);
+}
+.au-shot-big {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(15, 23, 42, .82);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    cursor: zoom-out;
+}
+.au-shot-big.show { display: flex; }
+.au-shot-big img { max-width: 100%; max-height: 100%; background: #fff; border-radius: 6px; }
+
+/* ---------------- 查验进度浮层 ---------------- */
+.audit-panel {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    width: 380px;
+    max-width: calc(100vw - 40px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    z-index: 50;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+}
+.audit-panel.show { display: flex; }
+.ap-hd {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+    font-size: 13px;
+}
+.ap-hd b { font-size: 13.5px; }
+.ap-count { margin-left: auto; color: var(--muted); font-family: Consolas, monospace; }
+.ap-x {
+    border: 0;
+    background: none;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 0 2px;
+}
+.ap-x:hover { color: var(--text); }
+.ap-bar { height: 4px; background: var(--border); }
+.ap-bar i { display: block; height: 100%; width: 0; background: var(--primary); transition: width .3s; }
+.ap-sum { padding: 9px 14px 6px; font-size: 12.5px; color: var(--muted); }
+.ap-sum b { color: var(--text); }
+.ap-log {
+    padding: 0 14px 8px;
+    font-family: Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.65;
+    color: var(--muted);
+    max-height: 168px;
+    overflow: auto;
+    flex: 1;
+}
+.ap-log div { white-space: pre-wrap; word-break: break-all; }
+.ap-ft {
+    padding: 8px 14px 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+}
+.ap-ft button {
+    height: 30px;
+    padding: 0 12px;
+    font-size: 12.5px;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-ctl);
+    background: var(--surface);
+    cursor: pointer;
+}
+.ap-ft button:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
+.ap-ft button:disabled { color: var(--muted-2); cursor: default; background: var(--surface-2); border-color: var(--border); }
 
 .batch-link { color: var(--primary); text-decoration: none; font-weight: 600; font-family: Consolas, monospace; }
 .batch-link:hover { text-decoration: underline; }

@@ -388,6 +388,7 @@ function qs() {
     if ($('fperson').value) p.push('person=' + encodeURIComponent($('fperson').value));
     if ($('fmonth').value) p.push('month=' + encodeURIComponent($('fmonth').value));
     if ($('fstatus').value !== '') p.push('status=' + encodeURIComponent($('fstatus').value));
+    if ($('faudit').value !== '') p.push('audit=' + encodeURIComponent($('faudit').value));
     if ($('fbatch').value !== '') p.push('batch=' + encodeURIComponent($('fbatch').value));
     p.push('sort=' + state.sort);
     p.push('desc=' + (state.desc ? '1' : '0'));
@@ -483,6 +484,25 @@ function batchCell(r) {
         esc(r.batch_no) + '</a>';
 }
 
+/* ---------------- 查验状态 ---------------- */
+var AUDIT_TEXT = { 0: '未查验', 1: '查验通过', 2: '查验不通过', 3: '无需查验' };
+var AUDIT_CLASS = { 0: 'au-none', 1: 'au-pass', 2: 'au-fail', 3: 'au-skip' };
+
+function auditStatus(r) {
+    var v = (r.audit_status === null || r.audit_status === undefined) ? 0 : Number(r.audit_status);
+    return isNaN(v) ? 0 : v;
+}
+
+function auditBadge(r) {
+    var v = auditStatus(r);
+    var tip = AUDIT_TEXT[v];
+    if (r.audit_at) tip += '（' + r.audit_at + '）';
+    if (r.audit_msg) tip += '\n' + r.audit_msg;
+    if (v === 0) tip += '\n还没查过，勾选后点「查验选中」';
+    return '<span class="tag ' + (AUDIT_CLASS[v] || 'au-none') + '" title="' + esc(tip) + '">' +
+        AUDIT_TEXT[v] + '</span>';
+}
+
 function renderTable() {
     var tb = $('tbody');
     tb.innerHTML = '';
@@ -506,6 +526,7 @@ function renderTable() {
             '<td class="person">' + esc(r.person || '') + '</td>' +
             '<td class="payee">' + payeeCell(r) + '</td>' +
             '<td class="st">' + statusSwitch(r) + '</td>' +
+            '<td class="au">' + auditBadge(r) + '</td>' +
             '<td class="note" title="' + esc(r.note || '') + '">' + esc(r.note || '') + '</td>' +
             '<td class="ops">' +
             '<button type="button" data-act="edit" title="修改这张发票">修改</button>' +
@@ -580,6 +601,99 @@ function detachSelected() {
         loadList();
     });
 }
+
+/* ------------------------------------------------------------------ */
+/* 发票查验                                                            */
+/* ------------------------------------------------------------------ */
+var auditTimer = null;
+
+function showAuditPanel() {
+    $('auditPanel').classList.add('show');
+    $('auditPanel').setAttribute('aria-hidden', 'false');
+}
+
+function hideAuditPanel() {
+    $('auditPanel').classList.remove('show');
+    $('auditPanel').setAttribute('aria-hidden', 'true');
+}
+
+function scheduleAuditPoll(ms) {
+    clearTimeout(auditTimer);
+    auditTimer = setTimeout(pollAudit, ms || 1500);
+}
+
+function startAudit(payload) {
+    postJSON('/api/audit/start', payload).then(function (r) {
+        if (!r.ok) { toast(r.error || '查验没能启动', 'err'); return; }
+        showAuditPanel();
+        renderAudit(r.state);
+        toast('开始查验 ' + (r.count || 0) + ' 张发票，进度在右下角', 'ok');
+        scheduleAuditPoll(500);
+    });
+}
+
+function auditSelected() {
+    var ids = selectedIds();
+    if (ids.length) {
+        startAudit({ ids: ids });
+        return;
+    }
+    if (!confirm('没有勾选发票。\n\n要查验全部「未查验 / 上次没通过」的发票吗？')) return;
+    startAudit({ scope: 'unchecked' });
+}
+
+function pollAudit() {
+    api('/api/audit/status').then(function (r) {
+        if (!r.ok) { scheduleAuditPoll(3000); return; }
+        var s = r.state || {};
+        renderAudit(s);
+        if (s.running) {
+            scheduleAuditPoll(1500);
+        } else {
+            clearSelection();
+            loadList();
+        }
+    });
+}
+
+function renderAudit(s) {
+    if (!s) return;
+    var total = Number(s.total || 0), done = Number(s.done || 0);
+    $('apCount').textContent = done + '/' + total;
+    $('apFill').style.width = (total ? Math.round(done / total * 100) : 0) + '%';
+    $('apSum').innerHTML = '成功 <b>' + (s.ok || 0) + '</b>　不通过 <b>' + (s.fail || 0) +
+        '</b>　跳过 <b>' + (s.skip || 0) + '</b>' +
+        (s.running ? '　当前：' + esc(s.current || '…') : '　已结束');
+    $('apLog').innerHTML = (s.log || []).slice(-40).map(function (e) {
+        return '<div>[' + esc(e.t || '') + '] ' + esc(e.text || '') + '</div>';
+    }).join('');
+    $('apLog').scrollTop = $('apLog').scrollHeight;
+    $('apStop').disabled = !s.running;
+    $('apStop').textContent = s.running ? '停止查验' : '已结束';
+}
+
+function stopAudit() {
+    postJSON('/api/audit/stop', {}).then(function (r) {
+        toast('已请求停止，当前这张查完就停', 'ok');
+        scheduleAuditPoll(800);
+    });
+}
+
+/* 详情里点缩略图看大图 */
+function showShotBig(id) {
+    var box = document.getElementById('shotBig');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'shotBig';
+        box.className = 'au-shot-big';
+        box.innerHTML = '<img alt="查验结果截图">';
+        box.addEventListener('click', function () { box.classList.remove('show'); });
+        document.body.appendChild(box);
+    }
+    box.querySelector('img').src = '/api/audit/shot?id=' + id + '&t=' + Date.now();
+    box.classList.add('show');
+}
+
 
 /* ------------------------------------------------------------------ */
 /* 选择报销单的小窗口                                                  */
@@ -713,6 +827,19 @@ function renderInvoiceDrawer() {
         h += dlRow('报销状态', statusBadge(paid));
         if (paid) h += dlRow('报销确认时间', esc(r.paid_at || '—'));
         h += dlRow('备注', esc(r.note || '—'));
+        h += '<div class="dl-sec">查验结果</div>';
+        h += dlRow('查验状态', auditBadge(r));
+        h += dlRow('查验时间', esc(r.audit_at || '—'));
+        h += dlRow('查验说明', esc(r.audit_msg || '—'));
+        if (r.audit_shot) {
+            h += '<div class="dl-row"><div class="dl-k">结果截图</div>' +
+                '<div class="dl-v">' +
+                '<img class="au-shot" alt="查验结果截图" src="/api/audit/shot?id=' + r.id +
+                '&t=' + encodeURIComponent(r.audit_at || '') + '" data-shot="' + r.id + '">' +
+                '<div class="dl-note">点图片看大图，可作为已查验的凭证。</div></div></div>';
+        } else {
+            h += dlRow('结果截图', '<span class="payee-none">还没有截图</span>');
+        }
         h += '<div class="dl-sec">其他</div>';
         h += dlRow('登记时间', esc(r.created_at || '—'));
         h += dlRow('原件文件', r.file_name ? esc(r.file_name) : '<span class="payee-none">没有留存原件</span>');
@@ -721,6 +848,7 @@ function renderInvoiceDrawer() {
         $('drawerFoot').innerHTML =
             (r.file_rel ? '<button type="button" data-d="view">查看原件</button>'
                 : '<button type="button" disabled>无原件</button>') +
+            '<button type="button" data-d="audit">查验这张</button>' +
             '<button type="button" data-d="editinv">修改</button>' +
             '<span class="spacer"></span>' +
             (r.batch_id ? '<button type="button" data-d="openbatch">打开报销单</button>' : '') +
@@ -1011,6 +1139,7 @@ $('drawerFoot').addEventListener('click', function (ev) {
     var id = state.drawer.id;
 
     if (act === 'view') viewOriginal(id);
+    else if (act === 'audit') { startAudit({ ids: [id] }); toast('已开始查验，进度在右下角', 'ok'); }
     else if (act === 'editinv') { state.drawerEdit = 'invoice'; renderInvoiceDrawer(); }
     else if (act === 'saveinv') saveInvoiceEdit();
     else if (act === 'canceledit') {
@@ -1039,6 +1168,8 @@ $('drawerFoot').addEventListener('click', function (ev) {
 });
 
 $('drawerBody').addEventListener('click', function (ev) {
+    var shot = ev.target.closest('img[data-shot]');
+    if (shot) { showShotBig(Number(shot.dataset.shot)); return; }
     if (state.drawerEdit) return;
     var link = ev.target.closest('a[data-batch]');
     if (link) { openBatchDrawer(link.dataset.batch); return; }
@@ -1075,6 +1206,10 @@ $('btnAttach').addEventListener('click', attachSelected);
 $('btnNewBatch').addEventListener('click', newBatchFromSelected);
 $('btnDetach').addEventListener('click', detachSelected);
 $('btnClearSel').addEventListener('click', clearSelection);
+$('btnAudit').addEventListener('click', auditSelected);
+
+$('apClose').addEventListener('click', hideAuditPanel);
+$('apStop').addEventListener('click', stopAudit);
 
 document.querySelectorAll('th.sortable').forEach(function (th) {
     th.addEventListener('click', function () {
@@ -1089,7 +1224,7 @@ $('q').addEventListener('input', function () {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(loadList, 280);
 });
-['fperson', 'fmonth', 'fstatus', 'fbatch'].forEach(function (k) {
+['fperson', 'fmonth', 'fstatus', 'faudit', 'fbatch'].forEach(function (k) {
     $(k).addEventListener('change', loadList);
 });
 $('refresh').addEventListener('click', loadList);
@@ -1107,3 +1242,12 @@ document.addEventListener('keydown', function (e) {
 $('reimburse_date').value = todayISO();
 renderStage();
 loadList();
+
+/* 打开页面时如果后台正在查验（比如刷新了浏览器），把进度浮层接回来 */
+api('/api/audit/status').then(function (r) {
+    if (r.ok && r.state && r.state.running) {
+        showAuditPanel();
+        renderAudit(r.state);
+        scheduleAuditPoll(1200);
+    }
+});

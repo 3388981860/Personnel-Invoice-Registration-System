@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -96,6 +96,13 @@
                 <option value="0">未报销</option>
                 <option value="1">已报销</option>
             </select>
+            <select id="faudit">
+                <option value="">全部查验</option>
+                <option value="0">未查验</option>
+                <option value="1">查验通过</option>
+                <option value="2">查验不通过</option>
+                <option value="3">无需查验</option>
+            </select>
             <select id="fbatch"><option value="">全部报销单</option><option value="none">未归单</option></select>
             <button class="plain" id="refresh">刷新</button>
             <span class="count" id="count"></span>
@@ -103,6 +110,7 @@
 
         <div class="selbar" id="selbar">
             <span>已选 <b id="selCount">0</b> 张发票</span>
+            <button type="button" class="plain" id="btnAudit" title="把选中的发票送到国家税务总局查验平台核验">查验选中</button>
             <button type="button" class="plain" id="btnNewBatch">新建报销单</button>
             <button type="button" class="plain" id="btnAttach">加入已有报销单…</button>
             <button type="button" class="plain" id="btnDetach">从单里拆出</button>
@@ -121,6 +129,7 @@
                         <th style="width:100px" class="sortable" data-sort="person">报销人 <span class="arrow"></span></th>
                         <th style="width:110px">收款人</th>
                         <th style="width:130px" class="sortable" data-sort="status">报销状态 <span class="arrow"></span></th>
+                        <th style="width:96px">查验</th>
                         <th>备注</th>
                         <th class="ops" style="width:116px">操作</th>
                     </tr>
@@ -157,6 +166,22 @@
 </div>
 
 <div id="toast"></div>
+
+<!-- 查验进度浮层（右下角） -->
+<div class="audit-panel" id="auditPanel" aria-hidden="true">
+    <div class="ap-hd">
+        <b>发票查验</b>
+        <span class="ap-count" id="apCount">0/0</span>
+        <button type="button" class="ap-x" id="apClose" title="收起（不会中断查验）">×</button>
+    </div>
+    <div class="ap-bar"><i id="apFill"></i></div>
+    <div class="ap-sum" id="apSum">准备中…</div>
+    <div class="ap-log" id="apLog"></div>
+    <div class="ap-ft">
+        <button type="button" id="apStop">停止查验</button>
+    </div>
+</div>
+
 <script src="/static/app.js"></script>
 
 </body>
