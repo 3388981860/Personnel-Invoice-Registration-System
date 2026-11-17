@@ -390,6 +390,63 @@ button.plain:hover {
     border-radius: var(--r-card);
 }
 
+/* 台账：不再用内层滚动，改由分页控制行数。
+   内层滚动时浏览器会把被裁掉的行也算进根滚动区，导致页面能滚到大片空白；
+   改成随页面滚动后 doc 高度与内容一致，表头靠 sticky 吸在顶栏下方。 */
+.tablewrap-flow {
+    max-height: none;
+    overflow: visible;
+}
+
+/* 分页条 */
+.pager {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--muted);
+}
+.pager.show { display: flex; }
+.pg-info { color: var(--muted); }
+.pg-spacer { flex: 1; }
+.pg-size { display: flex; align-items: center; gap: 4px; }
+.pg-size select {
+    height: 30px;
+    padding: 0 6px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-ctl);
+    background: var(--surface);
+    cursor: pointer;
+}
+.pg-num {
+    min-width: 54px;
+    text-align: center;
+    font-family: Consolas, monospace;
+    font-size: 12.5px;
+    color: var(--text);
+}
+.pager button {
+    height: 30px;
+    padding: 0 12px;
+    font-family: inherit;
+    font-size: 13px;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-ctl);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+}
+.pager button:hover:not(:disabled) {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--primary-soft);
+}
+.pager button:disabled { color: var(--muted-2); background: var(--surface-2); cursor: default; }
+
 table {
     border-collapse: separate;
     border-spacing: 0;
@@ -400,7 +457,8 @@ table {
 
 thead th {
     position: sticky;
-    top: 0;
+    /* 让开顶部工具栏的高度（由 syncTopbarHeight() 写入变量，窄屏会变高） */
+    top: var(--topbar-h, 0px);
     z-index: 5;
     background: var(--surface-2);
     color: var(--muted);

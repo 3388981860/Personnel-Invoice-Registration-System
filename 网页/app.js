@@ -13,6 +13,8 @@ var state = {
     stageSeq: 0,
     sort: 'invoice_date',
     desc: true,
+    page: 1,              // 台账当前页
+    pageSize: 20,         // 每页条数
     selected: {},         // 台账里勾选的发票 id
     drawer: null,         // {type:'invoice'|'batch', id, batch}
     drawerEdit: null      // 'invoice' | 'batch' | null
@@ -544,14 +546,21 @@ function auditBadge(r) {    var v = auditStatus(r);
 function renderTable() {
     var tb = $('tbody');
     tb.innerHTML = '';
-    var rows = state.records;
-    $('empty').style.display = rows.length ? 'none' : 'block';
+    var all = state.records || [];
+    $('empty').style.display = all.length ? 'none' : 'block';
 
+    // 合计按「全部记录」算，不受当前页影响
     var total = 0, unpaidTotal = 0;
-    rows.forEach(function (r) {
+    all.forEach(function (r) {
         total += num0(r.amount);
+        if (Number(r.status) !== 1) unpaidTotal += num0(r.amount);
+    });
+
+    // 只渲染当前页
+    clampPage();
+    var start = (state.page - 1) * state.pageSize;
+    all.slice(start, start + state.pageSize).forEach(function (r) {
         var paid = Number(r.status) === 1;
-        if (!paid) unpaidTotal += num0(r.amount);
         var tr = document.createElement('tr');
         tr.dataset.id = r.id;
         if (paid) tr.className = 'paid';
@@ -573,12 +582,64 @@ function renderTable() {
         tb.appendChild(tr);
     });
 
-    $('count').textContent = rows.length
-        ? ('共 ' + rows.length + ' 条　合计 ' + moneyY(total) + '　其中未报销 ' + moneyY(unpaidTotal))
+    $('count').textContent = all.length
+        ? ('共 ' + all.length + ' 条　合计 ' + moneyY(total) + '　其中未报销 ' + moneyY(unpaidTotal))
         : '';
     updateSortArrows();
     renderSelbar();
+    renderPager();
     $('checkAll').checked = false;
+}
+
+/* ---------------- 分页 ---------------- */
+function pageCount() {
+    var n = Math.max(1, Math.ceil((state.records || []).length / state.pageSize));
+    return n;
+}
+
+function clampPage() {
+    var pc = pageCount();
+    if (state.page > pc) state.page = pc;
+    if (state.page < 1) state.page = 1;
+    return pc;
+}
+
+function renderPager() {
+    var total = (state.records || []).length;
+    var pc = pageCount();
+    var box = $('pager');
+    if (!box) return;
+    // 有记录就一直显示（只有一页时按钮禁用）。
+    // 不能因为"只有一页"就藏起来，否则每页改成 50 之后，就再也改不回 20 了。
+    box.className = 'pager' + (total ? ' show' : '');
+    if (!total) return;
+
+    var from = (state.page - 1) * state.pageSize + 1;
+    var to = Math.min(total, state.page * state.pageSize);
+    $('pgInfo').textContent = '第 ' + from + '–' + to + ' 条，共 ' + total + ' 条';
+    $('pgNum').textContent = state.page + ' / ' + pc;
+    $('pgPrev').disabled = state.page <= 1;
+    $('pgNext').disabled = state.page >= pc;
+    $('pgSize').value = String(state.pageSize);
+}
+
+function gotoPage(n) {
+    state.page = Math.max(1, Math.min(n, pageCount()));
+    renderTable();
+    // 翻页后把台账滚回视野顶部
+    var card = $('tbody').closest('.card');
+    if (card) {
+        var top = card.getBoundingClientRect().top + window.scrollY - 80;
+        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }
+}
+
+/* 顶栏是 sticky 的，表头吸顶时要让开它的高度（窄屏会换行变高） */
+function syncTopbarHeight() {
+    var bar = document.querySelector('.topbar');
+    if (bar) {
+        document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px');
+    }
 }
 
 function updateSortArrows() {
@@ -1323,18 +1384,29 @@ document.querySelectorAll('th.sortable').forEach(function (th) {
         var s = th.dataset.sort;
         if (state.sort === s) state.desc = !state.desc;
         else { state.sort = s; state.desc = true; }
+        state.page = 1;          // 排序变了，回到第一页
         loadList();
     });
 });
 var searchTimer = null;
 $('q').addEventListener('input', function () {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(loadList, 280);
+    searchTimer = setTimeout(function () { state.page = 1; loadList(); }, 280);
 });
 ['fperson', 'fmonth', 'fstatus', 'faudit', 'fbatch'].forEach(function (k) {
-    $(k).addEventListener('change', loadList);
+    $(k).addEventListener('change', function () { state.page = 1; loadList(); });
 });
 $('refresh').addEventListener('click', loadList);
+
+/* 分页 */
+$('pgPrev').addEventListener('click', function () { gotoPage(state.page - 1); });
+$('pgNext').addEventListener('click', function () { gotoPage(state.page + 1); });
+$('pgSize').addEventListener('change', function () {
+    state.pageSize = Number(this.value) || 20;
+    state.page = 1;
+    renderTable();
+});
+window.addEventListener('resize', syncTopbarHeight);
 
 document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && shotBigOpen()) { hideShotBig(); return; }
@@ -1348,6 +1420,7 @@ document.addEventListener('keydown', function (e) {
 });
 
 $('reimburse_date').value = todayISO();
+syncTopbarHeight();
 renderStage();
 loadList();
 

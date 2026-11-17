@@ -117,7 +117,7 @@
             <button type="button" class="plain" id="btnClearSel">取消选择</button>
         </div>
 
-        <div class="tablewrap">
+        <div class="tablewrap tablewrap-flow">
             <table class="grid-table">
                 <thead>
                     <tr>
@@ -137,6 +137,21 @@
                 <tbody id="tbody"></tbody>
             </table>
             <div class="empty" id="empty">还没有登记记录。拖入第一张发票试试。</div>
+        </div>
+
+        <div class="pager" id="pager">
+            <span class="pg-info" id="pgInfo"></span>
+            <span class="pg-spacer"></span>
+            <label class="pg-size">每页
+                <select id="pgSize">
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select> 条
+            </label>
+            <button type="button" class="plain" id="pgPrev">上一页</button>
+            <span class="pg-num" id="pgNum">1 / 1</span>
+            <button type="button" class="plain" id="pgNext">下一页</button>
         </div>
     </section>
 </main>
