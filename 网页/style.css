@@ -760,12 +760,28 @@ tbody tr.bad .hint-cell { color: var(--danger); font-weight: 500; }
     border: 1px solid var(--border);
     border-radius: 10px;
     box-shadow: var(--shadow);
-    z-index: 50;
+    /* 高于抽屉(61)和选单窗口(71)，低于大图(95)和 toast(99)：
+       查验进行中时，进度条必须一直看得见 */
+    z-index: 80;
     display: none;
     flex-direction: column;
     overflow: hidden;
+    transition: right .22s ease;
 }
 .audit-panel.show { display: flex; }
+
+/* 抽屉打开时把进度面板往左让开，别压住抽屉底部的按钮 */
+.drawer.show ~ .audit-panel {
+    right: 600px;
+}
+@media (max-width: 1200px) {
+    /* 窄屏时抽屉占掉大半，往左让不开，就挪到左下角 */
+    .drawer.show ~ .audit-panel {
+        right: auto;
+        left: 20px;
+        width: 300px;
+    }
+}
 .ap-hd {
     display: flex;
     align-items: center;

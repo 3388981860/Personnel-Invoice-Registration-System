@@ -1,0 +1,31 @@
+# Docker 一键运行：docker compose up -d --build
+#
+# 数据不放在镜像里，而是挂到宿主机：
+#   ./数据      -> 台账数据库、Excel、查验截图、备份
+#   ./发票存档  -> 发票原件
+# 升级时只需替换 程序/ 网页/ 再 docker compose up -d --build，数据不受影响。
+services:
+  invoice-ledger:
+    build:
+      context: ..
+      dockerfile: 部署/Dockerfile
+    image: invoice-ledger:latest
+    container_name: invoice-ledger
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      # 访问口令，格式 用户名:密码。留空表示不校验（只建议在内网且信任的环境下留空）
+      INVOICE_AUTH: "${INVOICE_AUTH:-}"
+      TZ: Asia/Shanghai
+    volumes:
+      - ../数据:/app/数据
+      - ../发票存档:/app/发票存档
+    # Playwright 在容器里跑 chromium 需要较大的 /dev/shm
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8765/_health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

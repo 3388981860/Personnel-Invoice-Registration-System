@@ -65,7 +65,9 @@ CONFIG = {
     # （两个入口都会跳到 /fpcygzfw/national-invoice-check），
     # 旧版那套 #fpdm / #fphm 选择器已经全部匹配不到，必须用 new。
     "page_version": "new",     # new=新版页面（当前有效）  old=旧版页面（已失效，留档）
-    "headless": False,         # 需要人工兜底验证码时保持有界面
+    # 默认无头：查验过程不弹浏览器窗口，用户只看右下角进度。
+    # 调试时想看见页面，把它改成 False（或改 数据\查验配置.json 里的 headless）。
+    "headless": True,
     "window_position": "-10,0",
     "viewport_width": 1400,
     "viewport_height": 900,
@@ -74,6 +76,9 @@ CONFIG = {
     "captcha_tries": 6,        # 连续识别不出验证码时的尝试次数
     "captcha_rounds": 4,       # 验证码被平台判错后，最多重来几轮
     "browser_path": "",        # 指定 chrome.exe 全路径；留空=用 Playwright 自己找
+    # 无头模式下必须伪装成普通 Chrome 的 UA：查验网关会直接拒掉 HeadlessChrome，
+    # 表现是验证码接口 net::ERR_FAILED。留空 = 按实际浏览器主版本自动生成。
+    "user_agent": "",
     # ---- 业务审核规则（P3）----
     "company_names": [],       # 抬头白名单，如 ["浙江信宇科技有限公司"]；空=不检查
     "warn_amount": 0,          # 单张金额 ≥ 这个数就提示（0=不检查）
@@ -195,11 +200,48 @@ def model_ready(version=None):
     return os.path.isfile(os.path.join(model_dir(version), "inference.onnx"))
 
 
+# 当前任务使用的 User-Agent（每次启动浏览器时确定，_one 建页面时套用）
+_UA = {"value": ""}
+
+
+def build_user_agent(browser_version):
+    """
+    生成一个"普通 Chrome"的 UA。
+
+    为什么必须这么做：无头浏览器默认 UA 里带 HeadlessChrome，
+    查验平台的网关会直接把跨域的验证码接口掐掉（net::ERR_FAILED），
+    表现就是"一直是未查验"。带上普通 UA 就正常了。
+    """
+    if CONFIG.get("user_agent"):
+        return CONFIG["user_agent"]
+    major = str(browser_version or "120").split(".")[0]
+    return ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/%s.0.0.0 Safari/537.36" % major)
+
+
+def new_page(browser):
+    """统一的建页方式：套用伪装 UA 和视口，避免各处分叉。"""
+    kw = {"viewport": {"width": CONFIG["viewport_width"],
+                       "height": CONFIG["viewport_height"]}}
+    if _UA["value"]:
+        kw["user_agent"] = _UA["value"]
+    return browser.new_page(**kw)
+
+
 def shot_rel_path(invoice_no, when=None):
-    """截图相对路径：数据\\查验截图\\年\\月\\发票号码.png"""
+    """截图相对路径：数据/查验截图/年/月/发票号码.png（统一用正斜杠，跨平台都能用）"""
     when = when or datetime.now()
-    return os.path.join("数据", "查验截图", when.strftime("%Y"), when.strftime("%m"),
-                        "%s.png" % _digits(invoice_no))
+    return "/".join(["数据", "查验截图", when.strftime("%Y"), when.strftime("%m"),
+                     "%s.png" % _digits(invoice_no)])
+
+
+def abs_rel(rel):
+    """把库里存的相对路径（可能带 Windows 反斜杠）转成本机绝对路径。"""
+    if not rel:
+        return None
+    parts = [p for p in str(rel).replace("\\", "/").split("/")
+             if p not in ("", ".", "..")]
+    return os.path.join(BASE, *parts) if parts else BASE
 
 
 # ----------------------------------------------------------------------
@@ -244,8 +286,8 @@ def _source_fields(record):
     rel = record.get("file_rel")
     if not rel:
         return out
-    path = os.path.join(BASE, rel)
-    if not os.path.isfile(path):
+    path = abs_rel(rel)
+    if not path or not os.path.isfile(path):
         return out
     ext = os.path.splitext(path)[1].lower()
     try:
@@ -913,9 +955,17 @@ class Runner(object):
                     self._log("浏览器启动失败：%s" % str(exc)[:300])
                     if "playwright install" in str(exc) or "Executable doesn't exist" in str(exc) \
                             or "chromium" in str(exc).lower():
-                        self._log("请在命令行执行一次：python -m playwright install chromium "
-                                  "（或在 数据\\查验配置.json 里用 browser_path 指定 chrome.exe）")
+                        self._log("解决办法：在项目目录执行下面的命令重装浏览器"
+                                  "（Linux 用 .venv/bin/python，Windows 用 python）：")
+                        self._log("    python -m playwright install chromium")
+                        self._log("如果浏览器已经装过，多半是「装的位置和服务用户看不到」"
+                                  "：设置环境变量 PLAYWRIGHT_BROWSERS_PATH 指向同一个目录后重启")
                     return
+
+                # 无头时把 UA 换成普通 Chrome，否则网关会掐掉验证码接口
+                _UA["value"] = build_user_agent(browser.version)
+                if CONFIG["headless"]:
+                    self._log("浏览器在后台运行（不弹窗口）")
                 try:
                     for rec in records:
                         if self.stop_flag.is_set():
@@ -973,7 +1023,7 @@ class Runner(object):
         for attempt in range(CONFIG["retries"]):
             page = None
             try:
-                page = browser.new_page()
+                page = new_page(browser)
                 status, msg, _body, data = _verify_once(page, query, sel,
                                                          recognizer, color_parser)
 
@@ -993,7 +1043,7 @@ class Runner(object):
                 # 有结果弹窗就截图（通过 / 不一致都留证）
                 if status in (AUDIT_PASS, AUDIT_FAIL):
                     rel = shot_rel_path(no)
-                    if _capture(page, sel, os.path.join(BASE, rel)):
+                    if _capture(page, sel, abs_rel(rel)):
                         shot = rel
                     else:
                         self._log("截图失败：%s" % no)
@@ -1008,7 +1058,7 @@ class Runner(object):
                 break
             except Exception as exc:
                 msg = "查验出错：%s" % str(exc)[:120]
-                self._log("%s 第 %d 次出错" % (no, attempt + 1))
+                self._log("%s 第 %d 次出错：%s" % (no, attempt + 1, str(exc)[:300]))
             finally:
                 try:
                     if page:

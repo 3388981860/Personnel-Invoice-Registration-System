@@ -1,0 +1,18 @@
+# Linux 服务器上需要的 Python 包（Windows 那边用的是「运行库」便携目录）
+# 安装：python3 -m pip install -r 部署/requirements-linux.txt
+
+# 发票查验：操作浏览器
+playwright>=1.40
+# 验证码识别（会一并装上 opencv / numpy / pillow）
+rapidocr>=3.0,<4
+onnxruntime>=1.16
+# 发票 PDF 解析
+pymupdf>=1.24
+# Excel 台账
+openpyxl>=3.1
+
+# 说明：二维码识别由 rapidocr 带的 opencv 兜底，不再依赖 zxingcpp。
+# （zxingcpp 在 Python 3.13 上没有可用 wheel，装上反而会让部署失败。）
+# 如果你想要更准的条码识别，可以单独试：
+#     .venv/bin/pip install zxingcpp
+# 装不上也不影响——只是图片型发票少了二维码兜底，仍会走文件名识别。

@@ -1,7 +1,8 @@
 {
-  "_说明": "发票查验参数。改完保存，重启系统后生效。page_version：new=新版页面（当前有效），old=旧版（已失效）。headless=true 时不弹浏览器窗口，但验证码识别失败时只能等程序重试，建议保持 false。company_names=本公司抬头白名单，购买方不在这里面的会打提示（留空数组=不检查）。warn_amount=单张金额超过多少元提示（0=不提示）。warn_cross_month=跨月报销是否提示，默认关闭（公司习惯次月报）。backoff=被平台限流后的等待秒数。",
+  "_说明": "发票查验参数。改完保存，重启系统后生效。page_version：new=新版页面（当前有效），old=旧版（已失效）。headless=true 表示查验时后台运行、不弹浏览器窗口（默认）；想看查验过程就改成 false。user_agent 留空=自动按浏览器版本伪装成普通 Chrome（必须，否则平台网关会拦验证码接口）。company_names=本公司抬头白名单，购买方不在这里面的会打提示（留空数组=不检查）。warn_amount=单张金额超过多少元提示（0=不提示）。warn_cross_month=跨月报销是否提示，默认关闭（公司习惯次月报）。backoff=被平台限流后的等待秒数。",
   "page_version": "new",
-  "headless": false,
+  "headless": true,
+  "user_agent": "",
   "window_position": "-10,0",
   "viewport_width": 1400,
   "viewport_height": 900,

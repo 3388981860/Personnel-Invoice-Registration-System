@@ -377,42 +377,68 @@ def _party_names(lines):
     return out
 
 
+def _qr_text(png_bytes):
+    """
+    从一张 PNG 里读出二维码文本。
+
+    两条路，按可用性自动选：
+      1. zxingcpp —— 识别最准（Windows 便携运行库里带）
+      2. opencv   —— rapidocr 的依赖，Linux 上一定有；没装 zxingcpp 时用它兜底
+    两个都没有就返回空串，调用方会退回"文件名里找号码"。
+    """
+    try:
+        import io
+        import zxingcpp
+        from PIL import Image
+        img = Image.open(io.BytesIO(png_bytes))
+        for r in zxingcpp.read_barcodes(img):
+            if getattr(r, "text", ""):
+                return r.text
+        return ""
+    except Exception:
+        pass
+
+    try:
+        import cv2
+        import numpy as np
+        arr = np.frombuffer(png_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return ""
+        data, _pts, _straight = cv2.QRCodeDetector().detectAndDecode(img)
+        return data or ""
+    except Exception:
+        return ""
+
+
 def _read_qr(doc):
     """渲染首页并用二维码解码兜底（应对图片型发票）。
     全电发票二维码内容形如： 01,32,,26327000001715695220,25.86,20260928,,3de2"""
-    try:
-        import zxingcpp
-        import io
-        from PIL import Image
-    except Exception:
-        return None
     out = {}
     try:
-        page = doc[0]
-        pix = page.get_pixmap(dpi=220)
-        img = Image.open(io.BytesIO(pix.tobytes("png")))
-        for r in zxingcpp.read_barcodes(img):
-            text = r.text or ""
-            parts = text.split(",")
-            if len(parts) >= 6:
-                no = re.sub(r"\D", "", parts[3])
-                if len(no) == 20:
-                    out["invoice_no"] = no
-                try:
-                    out["amount"] = round(float(parts[4]), 2)
-                except (ValueError, IndexError):
-                    pass
-                d = re.sub(r"\D", "", parts[5])
-                if len(d) == 8:
-                    out["invoice_date"] = "%s-%s-%s" % (d[:4], d[4:6], d[6:8])
-            if not out.get("invoice_no"):
-                m = RE_INVOICE_NO_ANY.search(text)
-                if m:
-                    out["invoice_no"] = m.group(1)
-            if out.get("invoice_no"):
-                break
+        pix = doc[0].get_pixmap(dpi=220)
+        text = _qr_text(pix.tobytes("png"))
     except Exception:
         return None
+    if not text:
+        return None
+
+    parts = text.split(",")
+    if len(parts) >= 6:
+        no = re.sub(r"\D", "", parts[3])
+        if len(no) == 20:
+            out["invoice_no"] = no
+        try:
+            out["amount"] = round(float(parts[4]), 2)
+        except (ValueError, IndexError):
+            pass
+        d = re.sub(r"\D", "", parts[5])
+        if len(d) == 8:
+            out["invoice_date"] = "%s-%s-%s" % (d[:4], d[4:6], d[6:8])
+    if not out.get("invoice_no"):
+        m = RE_INVOICE_NO_ANY.search(text)
+        if m:
+            out["invoice_no"] = m.group(1)
     return out or None
 
 

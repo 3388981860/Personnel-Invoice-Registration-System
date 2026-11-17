@@ -13,6 +13,7 @@ import json
 import mimetypes
 import os
 import socket
+import subprocess
 import sys
 import threading
 import traceback
@@ -85,6 +86,35 @@ def _audited_recently(stamp, days=30):
 DEFAULT_PORT = 8765
 ALLOWED_EXT = {".pdf", ".ofd"}
 
+IS_WINDOWS = (sys.platform == "win32")
+IS_MAC = (sys.platform == "darwin")
+
+# 监听地址：默认只给本机用；部署到服务器时用 --host 0.0.0.0 或环境变量
+DEFAULT_HOST = os.environ.get("INVOICE_HOST") or "127.0.0.1"
+# 可选的口令保护：INVOICE_AUTH="用户名:密码"，不设就是不校验
+AUTH = os.environ.get("INVOICE_AUTH") or ""
+
+
+def can_open_local():
+    """
+    能不能在"服务器这台机器"上弹出文件/文件夹。
+    纯 Linux 服务器没有图形界面，这个动作本来就没意义，
+    前端会根据这个值把「打开文件夹」这类按钮藏起来。
+    """
+    if IS_WINDOWS or IS_MAC:
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def open_local_path(target):
+    """在服务器本机打开文件或文件夹（仅在桌面环境有意义）。"""
+    if IS_WINDOWS:
+        os.startfile(target)          # noqa: 只在 Windows 存在
+    elif IS_MAC:
+        subprocess.Popen(["open", target])
+    else:
+        subprocess.Popen(["xdg-open", target])
+
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "InvoiceBook/1.0"
@@ -136,6 +166,31 @@ class Handler(BaseHTTPRequestHandler):
         return urllib.parse.parse_qs(parsed.query), parsed.path
 
     # ------------------------------------------------------------------
+    # 访问口令（可选）
+    # ------------------------------------------------------------------
+    def _check_auth(self):
+        """
+        设了环境变量 INVOICE_AUTH=用户名:密码 才校验，不设就是原来的"谁都能开"。
+        服务器暴露到局域网时必须设，否则同事以外的人也能看到发票。
+        """
+        if not AUTH:
+            return True
+        header = self.headers.get("Authorization") or ""
+        if not header.startswith("Basic "):
+            return False
+        try:
+            raw = base64.b64decode(header[6:]).decode("utf-8")
+        except Exception:
+            return False
+        return raw == AUTH
+
+    def _need_auth(self):
+        return self._send(
+            401, json.dumps({"ok": False, "error": "需要登录"}, ensure_ascii=False),
+            "application/json; charset=utf-8",
+            {"WWW-Authenticate": 'Basic realm="invoice-book", charset="UTF-8"'})
+
+    # ------------------------------------------------------------------
     # GET
     # ------------------------------------------------------------------
     def do_HEAD(self):
@@ -144,13 +199,23 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             qs, path = self._query()
+            if path == "/_health":
+                # 给 systemd / docker / 负载均衡做健康检查用，不需要登录
+                return self._send(200, b"ok", "text/plain; charset=utf-8")
+            if not self._check_auth():
+                return self._need_auth()
             if path in ("/", "/index.html"):
                 return self._serve_index()
             if path.startswith("/static/"):
                 name = os.path.basename(path)
                 return self._serve_file(os.path.join(WEB_DIR, name))
             if path == "/api/ping":
-                return self._json({"ok": True, "app": APP_TAG})
+                return self._json({
+                    "ok": True, "app": APP_TAG,
+                    "platform": sys.platform,
+                    "can_open_local": can_open_local(),
+                    "version": "1.1",
+                })
             if path == "/api/list":
                 return self._api_list(qs)
             if path == "/api/batches":
@@ -251,7 +316,7 @@ class Handler(BaseHTTPRequestHandler):
         rec = STORE.get(int(rid)) if rid.isdigit() else None
         if not rec or not rec.get("file_rel"):
             return self._err("没有对应的发票原件", 404)
-        path = os.path.join(BASE, rec["file_rel"])
+        path = STORE.rel_path(rec["file_rel"])
         if not os.path.isfile(path):
             return self._err("原件已不在原位置", 404)
         ext = os.path.splitext(path)[1].lower()
@@ -262,11 +327,14 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, data, ctype, {"Content-Disposition": "inline; filename*=UTF-8''" + name})
 
     def _api_openfolder(self, qs):
-        """在资源管理器里打开 发票存档 / 数据 文件夹。"""
+        """在资源管理器里打开 发票存档 / 数据 文件夹（仅桌面系统）。"""
         which = (qs.get("which") or ["archive"])[0]
         target = STORE.archive_dir if which == "archive" else STORE.data_dir
+        if not can_open_local():
+            return self._err("服务器没有图形界面，请在浏览器里下载查看；"
+                             "或用命令行进入：%s" % target, 501)
         try:
-            os.startfile(target)
+            open_local_path(target)
         except Exception as exc:
             return self._err("打开文件夹失败：%s" % exc)
         return self._json({"ok": True})
@@ -296,6 +364,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             _, path = self._query()
+            if not self._check_auth():
+                return self._need_auth()
             if path == "/api/parse":
                 return self._api_parse()
             if path == "/api/add":
@@ -590,11 +660,13 @@ class Handler(BaseHTTPRequestHandler):
         rec = STORE.get(int(rid)) if rid else None
         if not rec or not rec.get("file_rel"):
             return self._err("没有对应的发票原件", 404)
-        path = os.path.join(BASE, rec["file_rel"])
+        path = STORE.rel_path(rec["file_rel"])
         if not os.path.isfile(path):
             return self._err("原件已不在原位置", 404)
+        if not can_open_local():
+            return self._err("服务器没有图形界面，请用「查看原件」在浏览器里打开", 501)
         try:
-            os.startfile(path)
+            open_local_path(path)
         except Exception as exc:
             return self._err("打开失败：%s" % exc)
         return self._json({"ok": True})
@@ -671,8 +743,8 @@ class Handler(BaseHTTPRequestHandler):
         rel = (rec or {}).get("audit_shot")
         if not rel:
             return self._err("这张发票还没有查验截图", 404)
-        base = os.path.abspath(os.path.join(BASE, "数据", "查验截图"))
-        path = os.path.abspath(os.path.join(BASE, rel))
+        base = os.path.abspath(STORE.shot_dir)
+        path = os.path.abspath(STORE.rel_path(rel))
         if not path.startswith(base + os.sep):
             return self._err("路径不合法", 400)
         if not os.path.isfile(path):
@@ -707,6 +779,15 @@ def _is_our_server(port):
         return False
 
 
+def _argv_value(flag):
+    """取 --flag value 形式的参数值。"""
+    if flag in sys.argv:
+        i = sys.argv.index(flag)
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return None
+
+
 def main():
     # 输出到管道/重定向时，用系统默认编码并容错，避免中文报错
     try:
@@ -715,28 +796,52 @@ def main():
     except Exception:
         pass
 
-    # 如果系统已经在运行，直接把浏览器叫起来，不重复开第二个服务
-    if port_in_use(DEFAULT_PORT) and _is_our_server(DEFAULT_PORT):
-        url = "http://127.0.0.1:%d/" % DEFAULT_PORT
+    # 监听地址与端口：服务器部署一般传 --host 0.0.0.0
+    host = _argv_value("--host") or DEFAULT_HOST
+    try:
+        port = int(_argv_value("--port") or DEFAULT_PORT)
+    except ValueError:
+        port = DEFAULT_PORT
+    open_browser = ("--no-browser" not in sys.argv) and (host in ("127.0.0.1", "localhost"))
+
+    # 本地模式：系统已经在运行就把浏览器叫起来，不重复开第二个服务
+    if host in ("127.0.0.1", "localhost") and port_in_use(port) and _is_our_server(port):
+        url = "http://127.0.0.1:%d/" % port
         print("人数发票登记系统已经在运行，正在为你打开浏览器： %s" % url)
         try:
             sys.stdout.flush()
         except Exception:
             pass
-        if "--no-browser" not in sys.argv:
+        if open_browser:
             webbrowser.open(url)
         sys.exit(3)          # 3 = 已经在运行，启动脚本据此给出对应提示
 
-    port = pick_port()
-    url = "http://127.0.0.1:%d/" % port
+    if host in ("127.0.0.1", "localhost") and not port_in_use(port):
+        pass
+    elif port_in_use(port):
+        # 服务器模式：端口被占就直接退出，别悄悄换端口让运维找不到
+        print("端口 %d 已被占用，请换一个：--port 8766" % port)
+        sys.exit(1)
+
+    show_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    url = "http://%s:%d/" % (show_host, port)
 
     print("=" * 58)
     print("  人数发票登记台账  正在运行")
-    print("  请使用浏览器访问： %s" % url)
+    if host in ("0.0.0.0", "::"):
+        print("  监听地址： %s:%d（局域网/外网可访问）" % (host, port))
+        print("  本机访问： %s" % url)
+        if AUTH:
+            print("  访问口令： 已开启（环境变量 INVOICE_AUTH）")
+        else:
+            print("  ⚠ 没有设访问口令：知道地址的人都能看台账。")
+            print("    建议设置环境变量 INVOICE_AUTH=\"用户名:密码\" 后重启。")
+    else:
+        print("  请使用浏览器访问： %s" % url)
     print("  数据目录： %s" % STORE.data_dir)
     print("  发票存档： %s" % STORE.archive_dir)
     print("-" * 58)
-    print("  关闭本窗口即退出系统（数据已实时保存，不会丢失）")
+    print("  运行平台： %s    可在本机打开文件： %s" % (sys.platform, can_open_local()))
     print("=" * 58)
 
     # 启动时自检：PDF 解析组件在不在
@@ -749,17 +854,17 @@ def main():
         print("  原因： %s" % exc)
         print("  程序找的运行库目录： %s" % LIB_DIR)
         print("  该目录存在吗： %s" % os.path.isdir(LIB_DIR))
-        print("  解决办法：把完整的「运行库」文件夹放回项目目录，")
+        print("  解决办法（Linux）：pip install pymupdf")
+        print("  解决办法（Windows）：把完整的「运行库」文件夹放回项目目录，")
         print("            然后关掉本窗口，重新双击 启动.bat。")
-        print("  也可以双击项目里的「自检.bat」生成检测报告。")
         print("!" * 58)
     try:
         sys.stdout.flush()
     except Exception:
         pass
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    if "--no-browser" not in sys.argv:
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    if open_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:
         httpd.serve_forever()

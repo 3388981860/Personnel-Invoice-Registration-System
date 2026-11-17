@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 数据层
 ------
@@ -119,10 +119,11 @@ class Store(object):
         self.tmp_dir = os.path.join(self.data_dir, "临时")
         self.backup_dir = os.path.join(self.data_dir, "备份")
         self.deleted_dir = os.path.join(self.data_dir, "已删除")
+        self.shot_dir = os.path.join(self.data_dir, "查验截图")
         self.db_path = os.path.join(self.data_dir, "发票台账.db")
         self.xlsx_path = os.path.join(self.data_dir, "发票台账.xlsx")
         for d in (self.data_dir, self.archive_dir, self.tmp_dir,
-                  self.backup_dir, self.deleted_dir):
+                  self.backup_dir, self.deleted_dir, self.shot_dir):
             os.makedirs(d, exist_ok=True)
         self._clean_tmp()
         self._init_db()
@@ -152,6 +153,23 @@ class Store(object):
         conn.row_factory = sqlite3.Row
         return conn
 
+    def rel_path(self, rel):
+        """
+        把数据库里存的相对路径转成本机绝对路径。
+
+        为什么要专门做一步：路径是按 Windows 习惯存成 "发票存档\\2026\\10\\x.pdf" 的，
+        直接搬到 Linux 上 os.path.join 会把反斜杠当成文件名的普通字符，永远找不到文件。
+        这里统一先把反斜杠转成 /，再按分段拼，Windows/Linux 都能用。
+        顺带挡掉 ".." 之类的越界写法。
+        """
+        if not rel:
+            return None
+        parts = [p for p in str(rel).replace("\\", "/").split("/")
+                 if p not in ("", ".", "..")]
+        if not parts:
+            return self.base
+        return os.path.join(self.base, *parts)
+
     def _init_db(self):
         with self._conn() as conn:
             conn.execute(
@@ -164,6 +182,15 @@ class Store(object):
                 if name not in have:
                     conn.execute("ALTER TABLE invoices ADD COLUMN %s %s" % (name, ddl))
             conn.execute("UPDATE invoices SET status = 0 WHERE status IS NULL")
+            # 换成 Linux 部署时，老库里的反斜杠路径要一次性转成正斜杠，
+            # 否则原件、查验截图全都找不到（char(92) 就是反斜杠）
+            conn.execute(
+                "UPDATE invoices SET file_rel = REPLACE(file_rel, char(92), '/') "
+                "WHERE file_rel LIKE '%' || char(92) || '%'")
+            conn.execute(
+                "UPDATE invoices SET audit_shot = REPLACE(audit_shot, char(92), '/') "
+                "WHERE audit_shot LIKE '%' || char(92) || '%'")
+            conn.execute("UPDATE invoices SET audit_status = 0 WHERE audit_status IS NULL")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_no ON invoices(invoice_no)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_person ON invoices(person)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_date ON invoices(invoice_date)")
@@ -697,7 +724,7 @@ class Store(object):
             return
         # 原件移入「已删除」，不做真删除
         if rec.get("file_rel"):
-            src = os.path.join(self.base, rec["file_rel"])
+            src = self.rel_path(rec["file_rel"])
             if os.path.exists(src):
                 stamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
                 dst = os.path.join(self.deleted_dir, "%s_%s" % (stamp, os.path.basename(src)))
@@ -731,13 +758,13 @@ class Store(object):
             # 同号同月已存在：内容相同就复用，不同则加后缀
             try:
                 if os.path.getsize(target) == os.path.getsize(tmp_path):
-                    return os.path.relpath(target, self.base)
+                    return os.path.relpath(target, self.base).replace("\\", "/")
             except OSError:
                 pass
             target = os.path.join(folder, "%s_%d%s" % (invoice_no, n, ext))
             n += 1
         shutil.copy2(tmp_path, target)
-        return os.path.relpath(target, self.base)
+        return os.path.relpath(target, self.base).replace("\\", "/")
 
     # ------------------------------------------------------------------
     # Excel 同步 / 导出

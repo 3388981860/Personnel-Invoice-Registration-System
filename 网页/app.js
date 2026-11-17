@@ -1359,3 +1359,13 @@ api('/api/audit/status').then(function (r) {
         scheduleAuditPoll(1200);
     }
 });
+
+/* 部署在 Linux 服务器上时没有图形界面，"打开文件夹"这类按钮点了也没用，直接藏掉 */
+api('/api/ping').then(function (r) {
+    if (r && r.ok && r.can_open_local === false) {
+        ['btnFolderArchive', 'btnFolderData'].forEach(function (id) {
+            var el = $(id);
+            if (el) el.style.display = 'none';
+        });
+    }
+});

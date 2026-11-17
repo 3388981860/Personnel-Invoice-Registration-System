@@ -55,15 +55,20 @@ for d in ("程序", "网页", "运行库", "数据", "发票存档"):
 
 w("")
 w("【2】运行库关键文件（自动识别 PDF 就靠它们）")
+IS_WINDOWS = (sys.platform == "win32")
 KEY = [
     "运行库/pymupdf/__init__.py",
-    "运行库/pymupdf/_mupdf.pyd",
-    "运行库/pymupdf/_extra.pyd",
-    "运行库/pymupdf/mupdfcpp64.dll",
     "运行库/PIL/__init__.py",
     "运行库/openpyxl/__init__.py",
     "运行库/zxingcpp/__init__.py",
 ]
+if IS_WINDOWS:
+    # .pyd / .dll 只在 Windows 的便携式运行库里；Linux 走 pip 安装，不检查这些
+    KEY += [
+        "运行库/pymupdf/_mupdf.pyd",
+        "运行库/pymupdf/_extra.pyd",
+        "运行库/pymupdf/mupdfcpp64.dll",
+    ]
 missing = []
 for k in KEY:
     p = path(*k.split("/"))
@@ -72,6 +77,8 @@ for k in KEY:
     else:
         w("  %-34s 【缺失！】" % k)
         missing.append(k)
+if not IS_WINDOWS:
+    w("  （当前是 %s，不使用便携运行库；依赖通过 pip 安装）" % sys.platform)
 
 w("")
 w("【3】运行库 顶层内容")
@@ -149,7 +156,8 @@ else:
 w("")
 w("【8】程序 / 网页文件")
 for k in ("程序/server.py", "程序/store.py", "程序/reader.py",
-          "网页/index.html", "网页/app.js", "网页/style.css", "启动.bat"):
+          "网页/index.html", "网页/app.js", "网页/style.css",
+          "启动.bat" if IS_WINDOWS else "部署/start.sh"):
     p = path(*k.split("/"))
     w("  %-22s %s" % (k, ("%d 字节" % os.path.getsize(p)) if os.path.isfile(p) else "【缺失！】"))
 
