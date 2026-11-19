@@ -350,3 +350,69 @@ Playwright 默认去 `$HOME/.cache/ms-playwright` 找浏览器，
 
 `deploy.sh` 已按这个思路改：root 装 → `chown -R invoice:invoice $APP_DIR/.cache`
 → systemd 里再显式写一次 `PLAYWRIGHT_BROWSERS_PATH`，双保险。
+### 7.8 升级到多用户版本后，第一次登录
+
+升级后第一次启动，程序会自动建管理员账号，并把随机初始密码写到：
+
+```
+/opt/02-fapiaodengji/数据/管理员初始密码.txt
+```
+
+查看：
+
+```bash
+sudo cat /opt/02-fapiaodengji/数据/管理员初始密码.txt
+```
+
+用 `admin` + 这个密码登录，**系统会要求立刻改密码**，改完这个文件就可以删掉。
+
+如果忘了密码，可以这样重置（把 admin 的密码重置成固定值）：
+
+```bash
+cd /opt/02-fapiaodengji
+sudo -u invoice .venv/bin/python - <<'PY'
+import sys, os
+sys.path.insert(0, os.path.join(os.getcwd(), "程序"))
+import auth, store
+st = store.Store(os.getcwd())
+u = st.get_user_by_name("admin")
+st.set_password(u["id"], auth.hash_password("改成你的新密码"), must_change_pw=1)
+print("已重置")
+PY
+sudo systemctl restart invoice-ledger
+```
+
+### 7.9 忘记管理员密码 / 被锁在外面
+
+**最快办法**（不用传文件，服务器上直接跑）：
+
+```bash
+cd /opt/02-fapiaodengji
+sudo -u invoice .venv/bin/python - <<'PY'
+import sys, os, secrets
+sys.path.insert(0, os.path.join(os.getcwd(), "程序"))
+import auth, store
+st = store.Store(os.getcwd())
+u = st.get_user_by_name("admin")
+pw = "".join(secrets.choice("abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(10))
+st.set_password(u["id"], auth.hash_password(pw), must_change_pw=1)
+st.delete_user_sessions(u["id"])
+print("admin 新密码:", pw)
+PY
+```
+
+**或者**把项目里的 `工具/重置密码.py` 传上去，它会列出所有账号让你选：
+
+```bash
+cd /opt/02-fapiaodengji
+sudo -u invoice .venv/bin/python 工具/重置密码.py admin
+```
+
+Windows 单机版直接双击 `工具\重置密码.bat`。
+
+### 7.10 不要用「用户管理」里的「重置密码」重置自己
+
+那个操作会给随机新密码 + **立刻清掉自己的登录状态**，新密码只闪一下。
+自己改密码请用顶栏的「改密码」（需要原密码，不会掉线）。
+
+（新版本里自己那一行已经不显示「重置密码」了，只剩「改密码」。）

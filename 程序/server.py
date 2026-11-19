@@ -67,10 +67,12 @@ sys.path.insert(0, APP_DIR)
 import reader      # noqa: E402
 import store as store_mod  # noqa: E402
 import audit as audit_mod  # noqa: E402
+import auth as auth_mod    # noqa: E402
 
 STORE = store_mod.Store(BASE)
 AUDIT_RUNNER = audit_mod.Runner(STORE)
 APP_TAG = "invoice-book"
+BUILD = "20261118"       # 构建号，显示在右上角账号菜单里
 
 
 def _audited_recently(stamp, days=30):
@@ -166,29 +168,146 @@ class Handler(BaseHTTPRequestHandler):
         return urllib.parse.parse_qs(parsed.query), parsed.path
 
     # ------------------------------------------------------------------
-    # 访问口令（可选）
+    # 登录与会话
     # ------------------------------------------------------------------
-    def _check_auth(self):
-        """
-        设了环境变量 INVOICE_AUTH=用户名:密码 才校验，不设就是原来的"谁都能开"。
-        服务器暴露到局域网时必须设，否则同事以外的人也能看到发票。
-        """
-        if not AUTH:
-            return True
-        header = self.headers.get("Authorization") or ""
-        if not header.startswith("Basic "):
-            return False
-        try:
-            raw = base64.b64decode(header[6:]).decode("utf-8")
-        except Exception:
-            return False
-        return raw == AUTH
+    def _cookie_token(self):
+        raw = self.headers.get("Cookie") or ""
+        for part in raw.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "sid":
+                return v.strip()
+        return None
 
-    def _need_auth(self):
-        return self._send(
-            401, json.dumps({"ok": False, "error": "需要登录"}, ensure_ascii=False),
-            "application/json; charset=utf-8",
-            {"WWW-Authenticate": 'Basic realm="invoice-book", charset="UTF-8"'})
+    def _current_user(self):
+        """当前登录用户；未登录/过期/被停用都返回 None。"""
+        try:
+            return STORE.get_session_user(self._cookie_token())
+        except Exception:
+            traceback.print_exc()
+            return None
+
+    def _need_login(self):
+        return self._send(401, json.dumps(
+            {"ok": False, "error": "请先登录", "need_login": True},
+            ensure_ascii=False), "application/json; charset=utf-8")
+
+    def _need_admin(self):
+        return self._err("只有管理员能做这个操作", 403)
+
+    def _redirect_login(self):
+        return self._send(302, b"", "text/plain", {"Location": "/login"})
+
+    def _set_cookie(self, token, days=None):
+        days = days if days is not None else auth_mod.SESSION_DAYS
+        return ("sid=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Lax"
+                % (token, int(days * 86400)))
+
+    def _is_admin(self, user):
+        return bool(user) and user.get("role") == "admin"
+
+    def _is_staff(self, user):
+        """有没有"看全部/审查"的权限（目前只有管理员）。"""
+        return self._is_admin(user)
+
+    def _client_ip(self):
+        return self.headers.get("X-Real-IP") or self.client_address[0]
+
+    def _api_login(self):
+        data = self._json_body()
+        username = str(data.get("username") or "").strip()
+        password = str(data.get("password") or "")
+        key = "%s|%s" % (username.lower(), self._client_ip())
+
+        wait = auth_mod.THROTTLE.blocked(key)
+        if wait:
+            return self._err("登录失败次数太多，请 %d 秒后再试" % wait, 429)
+
+        user = STORE.get_user_by_name(username)
+        if not user or not auth_mod.verify_password(password, user["password_hash"]):
+            auth_mod.THROTTLE.fail(key)
+            return self._err("用户名或密码不对", 401)
+        if int(user["status"] or 0) != 1:
+            return self._err("这个账号已被停用，请联系管理员", 403)
+
+        auth_mod.THROTTLE.reset(key)
+        token = STORE.create_session(user["id"], self._client_ip(),
+                                     self.headers.get("User-Agent"))
+        STORE.touch_login(user["id"])
+        STORE.log_action(user["id"], user["username"], "login", "user", user["id"])
+        return self._send(200, json.dumps({
+            "ok": True,
+            "user": self._public_user(user),
+            "must_change_pw": bool(user["must_change_pw"]),
+        }, ensure_ascii=False), "application/json; charset=utf-8",
+            {"Set-Cookie": self._set_cookie(token)})
+
+    def _api_register(self):
+        """自助注册：只能注册成普通用户。"""
+        data = self._json_body()
+        username = str(data.get("username") or "").strip()
+        password = str(data.get("password") or "")
+        display = str(data.get("display_name") or "").strip() or username
+
+        problem = auth_mod.username_problem(username)
+        if problem:
+            return self._err(problem)
+        problem = auth_mod.password_problem(password)
+        if problem:
+            return self._err(problem)
+        if STORE.get_user_by_name(username):
+            return self._err("这个用户名已经被占用了")
+
+        uid = STORE.create_user(username, auth_mod.hash_password(password),
+                                display, role="user")
+        STORE.log_action(uid, username, "register", "user", uid)
+        STORE.notify_admins("account", "新用户注册",
+                            "%s（%s）刚刚注册了账号" % (display, username))
+        token = STORE.create_session(uid, self._client_ip(),
+                                     self.headers.get("User-Agent"))
+        return self._send(200, json.dumps({
+            "ok": True, "user": self._public_user(STORE.get_user(uid)),
+        }, ensure_ascii=False), "application/json; charset=utf-8",
+            {"Set-Cookie": self._set_cookie(token)})
+
+    def _api_logout(self, user):
+        token = self._cookie_token()
+        if token:
+            STORE.delete_session(token)
+        return self._send(200, b'{"ok": true}', "application/json; charset=utf-8",
+                          {"Set-Cookie": "sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"})
+
+    def _api_me(self, user):
+        return self._json({
+            "ok": True,
+            "user": self._public_user(user),
+            "unread": STORE.unread_count(user["id"]),
+            "pending_reviews": STORE.count_pending_reviews() if self._is_admin(user) else 0,
+            "build": BUILD,
+            "can_open_local": can_open_local(),
+        })
+
+    def _api_password(self, user):
+        data = self._json_body()
+        old = str(data.get("old") or "")
+        new = str(data.get("new") or "")
+        if not auth_mod.verify_password(old, STORE.get_user(user["id"])["password_hash"]):
+            return self._err("原密码不对")
+        problem = auth_mod.password_problem(new)
+        if problem:
+            return self._err(problem)
+        STORE.set_password(user["id"], auth_mod.hash_password(new), must_change_pw=0)
+        STORE.log_action(user["id"], user["username"], "change_password", "user", user["id"])
+        return self._json({"ok": True})
+
+    @staticmethod
+    def _public_user(u):
+        if not u:
+            return None
+        return {
+            "id": u["id"], "username": u["username"],
+            "display_name": u.get("display_name") or u["username"],
+            "role": u["role"], "must_change_pw": int(u.get("must_change_pw") or 0),
+        }
 
     # ------------------------------------------------------------------
     # GET
@@ -202,38 +321,59 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/_health":
                 # 给 systemd / docker / 负载均衡做健康检查用，不需要登录
                 return self._send(200, b"ok", "text/plain; charset=utf-8")
-            if not self._check_auth():
-                return self._need_auth()
-            if path in ("/", "/index.html"):
-                return self._serve_index()
-            if path.startswith("/static/"):
-                name = os.path.basename(path)
-                return self._serve_file(os.path.join(WEB_DIR, name))
+            if path == "/favicon.ico":
+                # 不给的话浏览器每次都会打一条 404 到控制台
+                return self._send(204, b"", "image/x-icon")
+            if path in ("/login", "/login.html"):
+                return self._serve_file(os.path.join(WEB_DIR, "login.html"))
             if path == "/api/ping":
                 return self._json({
                     "ok": True, "app": APP_TAG,
                     "platform": sys.platform,
                     "can_open_local": can_open_local(),
-                    "version": "1.1",
+                    "version": "2.0",
+                    "build": BUILD,
+                    "logged_in": bool(self._current_user()),
                 })
+            if path.startswith("/static/"):
+                return self._serve_file(os.path.join(WEB_DIR, os.path.basename(path)))
+
+            user = self._current_user()
+            if not user:
+                if path.startswith("/api/"):
+                    return self._need_login()
+                return self._redirect_login()
+
+            if path in ("/", "/index.html"):
+                return self._serve_index()
+            if path == "/api/me":
+                return self._api_me(user)
             if path == "/api/list":
-                return self._api_list(qs)
+                return self._api_list(qs, user)
             if path == "/api/batches":
-                return self._api_batches(qs)
+                return self._api_batches(qs, user)
             if path == "/api/batch":
-                return self._api_batch(qs)
+                return self._api_batch(qs, user)
             if path == "/api/check":
-                return self._api_check(qs)
+                return self._api_check(qs, user)
             if path == "/api/file":
-                return self._api_file(qs)
+                return self._api_file(qs, user)
             if path == "/api/export":
-                return self._api_export()
+                return self._api_export(user)
             if path == "/api/openfolder":
                 return self._api_openfolder(qs)
+            if path == "/api/notifications":
+                return self._api_notifications(user)
+            if path == "/api/logs":
+                return self._api_logs(user)
+            if path == "/api/users":
+                return self._api_users(user)
+            if path == "/api/stats/overview":
+                return self._api_stats(user)
             if path == "/api/audit/status":
-                return self._api_audit_status()
+                return self._api_audit_status(user)
             if path == "/api/audit/shot":
-                return self._api_audit_shot(qs)
+                return self._api_audit_shot(qs, user)
             return self._err("未知地址", 404)
         except Exception:
             traceback.print_exc()
@@ -250,7 +390,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._err("找不到网页文件 index.html", 404)
         with open(path, "rb") as f:
             html = f.read().decode("utf-8")
-        for name in ("style.css", "app.js"):
+        for name in ("style.css", "app.js", "echarts.min.js"):
             target = os.path.join(WEB_DIR, name)
             try:
                 ver = int(os.path.getmtime(target))
@@ -269,53 +409,114 @@ class Handler(BaseHTTPRequestHandler):
             data = f.read()
         return self._send(200, data, ctype)
 
-    def _api_list(self, qs):
+    def _api_list(self, qs, user):
         def one(key):
             v = qs.get(key)
             return v[0] if v else None
+        # 普通用户强制只看自己的；管理员可以按 owner 过滤，也可以看全部
+        owner = None
+        if not self._is_admin(user):
+            owner = user["id"]
+        elif one("owner"):
+            owner = one("owner")
         records = STORE.list(
             q=one("q"), person=one("person"), month=one("month"),
             status=one("status"), batch_id=one("batch"), audit=one("audit"),
+            owner_id=owner, review_status=one("review"),
             sort=one("sort") or "invoice_date",
             desc=(one("desc") or "1") != "0",
         )
+        batches = STORE.list_batches(limit=500, owner_id=owner)
         return self._json({
             "ok": True,
             "records": records,
-            "stats": STORE.stats(),
+            "stats": STORE.stats(owner_id=owner),
             "persons": STORE.persons(),
             "months": STORE.months(),
-            "batches": [{"id": b["id"], "batch_no": b["batch_no"]}
-                        for b in STORE.list_batches(limit=500)],
+            "batches": [{"id": b["id"], "batch_no": b["batch_no"],
+                         "review_status": b.get("review_status")}
+                        for b in batches],
         })
 
-    def _api_batches(self, qs):
+    def _api_batches(self, qs, user):
         def one(key):
             v = qs.get(key)
             return v[0] if v else None
+        owner = None if self._is_admin(user) else user["id"]
         return self._json({"ok": True, "batches": STORE.list_batches(
-            q=one("q"), status=one("status"), person=one("person"))})
+            q=one("q"), status=one("status"), person=one("person"),
+            owner_id=owner, review_status=one("review"))})
 
-    def _api_batch(self, qs):
+    def _api_batch(self, qs, user):
         bid = (qs.get("id") or [""])[0]
         if not bid.isdigit():
             return self._err("缺少报销单编号")
         b = STORE.batch_detail(int(bid))
         if not b:
             return self._err("找不到这张报销单", 404)
+        # 普通用户只能看自己的单
+        if not self._is_admin(user) and int(b.get("owner_id") or 0) != int(user["id"]):
+            return self._err("这张报销单不属于你", 403)
+        b["issues"] = STORE.review_issues(b)
+        b["can_edit"] = self._batch_editable(b, user)
         return self._json({"ok": True, "batch": b})
 
-    def _api_check(self, qs):
+    def _batch_editable(self, batch, user):
+        """
+        谁能在什么时候改这张单：
+          管理员：随时（要改已通过的单，先退回）
+          普通用户：只有自己的、且状态是 returned（已退回）
+        """
+        if not batch:
+            return False
+        st = str(batch.get("review_status") or "approved")
+        if self._is_admin(user):
+            return st != "approved"
+        return (int(batch.get("owner_id") or 0) == int(user["id"])) and st == "returned"
+
+    def _load_batch(self, bid, user, need_edit=False):
+        """取单据 + 校验归属/可编辑性。返回 (batch, 错误响应)。"""
+        try:
+            b = STORE.batch_detail(int(bid))
+        except (TypeError, ValueError):
+            b = None
+        if not b:
+            return None, self._err("找不到这张报销单", 404)
+        if not self._is_admin(user) and int(b.get("owner_id") or 0) != int(user["id"]):
+            return None, self._err("这张报销单不属于你", 403)
+        if need_edit and not self._batch_editable(b, user):
+            return None, self._err("这张单当前状态不能修改（待审核或已通过）", 409)
+        return b, None
+
+    def _load_invoice(self, rid, user, need_edit=False):
+        """取发票 + 校验归属/可编辑性。返回 (record, 错误响应)。"""
+        rec = STORE.get(int(rid)) if str(rid or "").isdigit() else None
+        if not rec:
+            return None, self._err("找不到这张发票", 404)
+        if not self._is_admin(user) and int(rec.get("owner_id") or 0) != int(user["id"]):
+            return None, self._err("这张发票不属于你", 403)
+        if need_edit and rec.get("batch_id"):
+            b, err = self._load_batch(rec["batch_id"], user, need_edit=True)
+            if err:
+                return None, err
+        return rec, None
+
+    def _api_check(self, qs, user):
         no = (qs.get("no") or [""])[0]
         no = "".join(ch for ch in no if ch.isdigit())
         rec = STORE.get_by_no(no) if no else None
+        # 普通用户只告诉他"有没有"，不回传别人那张票的明细
+        if rec and not self._is_admin(user) and int(rec.get("owner_id") or 0) != int(user["id"]):
+            return self._json({"ok": True, "exists": True, "record": None, "others": True})
         return self._json({"ok": True, "exists": bool(rec), "record": rec})
 
-    def _api_file(self, qs):
+    def _api_file(self, qs, user):
         rid = (qs.get("id") or [""])[0]
         rec = STORE.get(int(rid)) if rid.isdigit() else None
         if not rec or not rec.get("file_rel"):
             return self._err("没有对应的发票原件", 404)
+        if not self._is_admin(user) and int(rec.get("owner_id") or 0) != int(user["id"]):
+            return self._err("这个原件不属于你", 403)
         path = STORE.rel_path(rec["file_rel"])
         if not os.path.isfile(path):
             return self._err("原件已不在原位置", 404)
@@ -339,11 +540,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._err("打开文件夹失败：%s" % exc)
         return self._json({"ok": True})
 
-    def _api_export(self):
+    def _api_export(self, user):
         import datetime
         name = "发票台账_%s.xlsx" % datetime.date.today().strftime("%Y%m%d")
         tmp = os.path.join(STORE.tmp_dir, name)
-        STORE.sync_excel(tmp)
+        # 普通用户只导出自己的
+        STORE.sync_excel(tmp, owner_id=None if self._is_admin(user) else user["id"])
         if not os.path.isfile(tmp):
             return self._err("导出失败", 500)
         with open(tmp, "rb") as f:
@@ -364,40 +566,65 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             _, path = self._query()
-            if not self._check_auth():
-                return self._need_auth()
+            # 登录、注册不需要会话
+            if path == "/api/login":
+                return self._api_login()
+            if path == "/api/register":
+                return self._api_register()
+
+            user = self._current_user()
+            if not user:
+                return self._need_login()
+            if path == "/api/logout":
+                return self._api_logout(user)
+            if path == "/api/password":
+                return self._api_password(user)
             if path == "/api/parse":
-                return self._api_parse()
+                return self._api_parse(user)
             if path == "/api/add":
-                return self._api_add()
+                return self._api_add(user)
             if path == "/api/batch_add":
-                return self._api_batch_add()
+                return self._api_batch_add(user)
+            if path == "/api/batch/review":
+                return self._api_batch_review(user)
             if path == "/api/batch_status":
-                return self._api_batch_status()
+                return self._api_batch_status(user)
+            if path == "/api/batch_resubmit":
+                return self._api_batch_resubmit(user)
             if path == "/api/batch_update":
-                return self._api_batch_update()
+                return self._api_batch_update(user)
             if path == "/api/attach":
-                return self._api_attach()
+                return self._api_attach(user)
             if path == "/api/detach":
-                return self._api_detach()
+                return self._api_detach(user)
             if path == "/api/update":
-                return self._api_update()
+                return self._api_update(user)
             if path == "/api/delete":
-                return self._api_delete()
+                return self._api_delete(user)
+            if path == "/api/batch_delete":
+                return self._api_batch_delete(user)
             if path == "/api/status":
-                return self._api_status()
+                return self._api_status(user)
             if path == "/api/openfile":
-                return self._api_openfile()
+                return self._api_openfile(user)
+            if path == "/api/notifications/read":
+                return self._api_notifications_read(user)
+            if path == "/api/users/create":
+                return self._api_user_create(user)
+            if path == "/api/users/update":
+                return self._api_user_update(user)
+            if path == "/api/users/reset_password":
+                return self._api_user_reset(user)
             if path == "/api/audit/start":
-                return self._api_audit_start()
+                return self._api_audit_start(user)
             if path == "/api/audit/stop":
-                return self._api_audit_stop()
+                return self._api_audit_stop(user)
             return self._err("未知地址", 404)
         except Exception:
             traceback.print_exc()
             return self._err("服务端错误", 500)
 
-    def _api_parse(self):
+    def _api_parse(self, user):
         """接收原始文件字节，落临时目录并自动识别。"""
         raw = self._body()
         if not raw:
@@ -461,9 +688,10 @@ class Handler(BaseHTTPRequestHandler):
             out["invoice_no"] = "".join(ch for ch in out["invoice_no"] if ch.isdigit())
         return out
 
-    def _api_add(self):
+    def _api_add(self, user):
         data = self._json_body()
         rec = self._clean(data)
+        rec["owner_id"] = user["id"]
         if not rec.get("invoice_no"):
             return self._err("请先填写发票号码")
         if not rec.get("person"):
@@ -515,7 +743,7 @@ class Handler(BaseHTTPRequestHandler):
         cand = os.path.join(STORE.tmp_dir, os.path.basename(token))
         return cand if os.path.isfile(cand) else None
 
-    def _api_batch_add(self):
+    def _api_batch_add(self, user):
         """一次登记多张发票，归入同一张报销单"""
         data = self._json_body()
         items_in = data.get("items") or []
@@ -545,7 +773,8 @@ class Handler(BaseHTTPRequestHandler):
                 batch_no=(data.get("batch_no") or "").strip() or None,
                 note=(data.get("note") or "").strip() or None,
                 person=person, payee=payee,
-                reimburse_date=(data.get("reimburse_date") or "").strip() or None)
+                reimburse_date=(data.get("reimburse_date") or "").strip() or None,
+                owner_id=user["id"], review_status="submitted")
         except store_mod.DuplicateError as dup:
             rec = dup.record or {}
             if rec.get("in_batch"):
@@ -556,10 +785,23 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             return self._err("提交失败：%s" % exc, 500)
         self._apply_audit_preset(ids)
+        try:
+            b = STORE.batch_detail(bid)
+            STORE.notify_admins(
+                "submit", "新单据 %s 待审核" % (b.get("batch_no") or ""),
+                "%s 提交了 %d 张发票，合计 ¥%.2f" % (
+                    user.get("display_name") or user["username"],
+                    len(ids), float(b.get("amount") or 0)), bid)
+            STORE.log_action(user["id"], user["username"], "submit", "batch", bid,
+                             b.get("batch_no"))
+        except Exception:
+            traceback.print_exc()
         return self._json({"ok": True, "batch_id": bid, "ids": ids,
                            "batch": STORE.batch_detail(bid)})
 
-    def _api_batch_status(self):
+    def _api_batch_status(self, user):
+        if not self._is_admin(user):
+            return self._need_admin()
         data = self._json_body()
         bid = data.get("id")
         if not bid:
@@ -568,13 +810,18 @@ class Handler(BaseHTTPRequestHandler):
             b = STORE.set_batch_status(int(bid), data.get("status"))
         except Exception as exc:
             return self._err("切换失败：%s" % exc, 500)
+        STORE.log_action(user["id"], user["username"], "batch_paid",
+                         "batch", int(bid), "标记%s" % ("已报销" if data.get("status") else "未报销"))
         return self._json({"ok": True, "batch": b, "stats": STORE.stats()})
 
-    def _api_batch_update(self):
+    def _api_batch_update(self, user):
         data = self._json_body()
         bid = data.get("id")
         if not bid:
             return self._err("缺少报销单编号")
+        b0, err = self._load_batch(bid, user, need_edit=True)
+        if err:
+            return err
         payload = {}
         for k in ("batch_no", "note", "person", "payee", "reimburse_date"):
             if k in data:
@@ -589,38 +836,58 @@ class Handler(BaseHTTPRequestHandler):
             return self._err("修改失败：%s" % exc, 500)
         return self._json({"ok": True, "batch": b})
 
-    def _api_attach(self):
+    def _api_attach(self, user):
         """把已登记的发票补挂到某张报销单"""
         data = self._json_body()
-        ids = data.get("ids") or []
+        ids = [int(x) for x in (data.get("ids") or []) if str(x).isdigit()]
         if not ids:
             return self._err("请先选中要归单的发票")
+        # 源发票必须是自己能改的（管理员不限）
+        for rid in ids:
+            _rec, err = self._load_invoice(rid, user, need_edit=True)
+            if err:
+                return err
+        bid = data.get("batch_id")
+        owner = user["id"]
+        if bid:
+            b0, err = self._load_batch(bid, user, need_edit=True)
+            if err:
+                return err
+            owner = b0.get("owner_id") or user["id"]
         try:
             b = STORE.attach_to_batch(
                 ids,
-                batch_id=data.get("batch_id"),
+                batch_id=bid,
                 batch_no=(data.get("batch_no") or "").strip() or None,
-                note=(data.get("note") or "").strip() or None)
+                note=(data.get("note") or "").strip() or None,
+                owner_id=owner)
         except Exception as exc:
             return self._err("归单失败：%s" % exc, 500)
         return self._json({"ok": True, "batch": b, "stats": STORE.stats()})
 
-    def _api_detach(self):
+    def _api_detach(self, user):
         data = self._json_body()
-        ids = data.get("ids") or []
+        ids = [int(x) for x in (data.get("ids") or []) if str(x).isdigit()]
         if not ids:
             return self._err("请先选中要拆出的发票")
+        for rid in ids:
+            _rec, err = self._load_invoice(rid, user, need_edit=True)
+            if err:
+                return err
         try:
             STORE.detach(ids)
         except Exception as exc:
             return self._err("拆出失败：%s" % exc, 500)
         return self._json({"ok": True, "stats": STORE.stats()})
 
-    def _api_update(self):
+    def _api_update(self, user):
         data = self._json_body()
         rid = data.get("id")
         if not rid:
             return self._err("缺少记录编号")
+        old, err = self._load_invoice(rid, user, need_edit=True)
+        if err:
+            return err
         rec = self._clean(data, only_present=True)
         try:
             STORE.update(int(rid), rec)
@@ -631,16 +898,82 @@ class Handler(BaseHTTPRequestHandler):
             return self._err("修改失败：%s" % exc, 500)
         return self._json({"ok": True, "record": STORE.get(int(rid))})
 
-    def _api_delete(self):
+    def _can_delete(self, rec, user):
+        """
+        删除规则：
+          · 只有发起人（owner）能删
+          · 待审核（可以撤回）、已退回 都能删；已通过不能删
+          · 没归单的散票，只有本人能删
+        返回 (True, None) 或 (False, 原因)
+        """
+        if int(rec.get("owner_id") or 0) != int(user["id"]):
+            return False, "只有提交人自己才能删除"
+        bid = rec.get("batch_id")
+        if not bid:
+            return True, None
+        b = STORE.get_batch(int(bid))
+        if not b:
+            return True, None
+        if int(b.get("owner_id") or 0) != int(user["id"]):
+            return False, "只有提交人自己才能删除"
+        st = str(b.get("review_status") or "approved")
+        if st == "approved":
+            return False, "单据已通过审核，不能删除"
+        return True, None
+
+    def _api_delete(self, user):
         data = self._json_body()
         rid = data.get("id")
         if not rid:
             return self._err("缺少记录编号")
+        rec = STORE.get(int(rid)) if str(rid).isdigit() else None
+        if not rec:
+            return self._err("找不到这张发票", 404)
+        ok, why = self._can_delete(rec, user)
+        if not ok:
+            return self._err(why, 403)
         STORE.delete(int(rid))
+        STORE.log_action(user["id"], user["username"], "delete_invoice",
+                         "invoice", int(rid), rec.get("invoice_no"))
         return self._json({"ok": True, "stats": STORE.stats()})
 
-    def _api_status(self):
-        """切换报销状态：0=未报销，1=已报销"""
+    def _api_batch_delete(self, user):
+        """整单删除：一次请求、一次校验、一起删，不会删一半。
+        待审核的单删掉等于"撤回"——会通知管理员。"""
+        data = self._json_body()
+        bid = data.get("id")
+        if not str(bid or "").isdigit():
+            return self._err("缺少报销单编号")
+        b = STORE.batch_detail(int(bid))
+        if not b:
+            return self._err("找不到这张报销单", 404)
+        if int(b.get("owner_id") or 0) != int(user["id"]):
+            return self._err("只有提交人自己才能删除这张单", 403)
+        st = str(b.get("review_status") or "approved")
+        if st == "approved":
+            return self._err("单据已通过审核，不能删除", 409)
+        withdrawn = (st == "submitted")
+        n = STORE.delete_batch(int(bid))
+        STORE.log_action(user["id"], user["username"],
+                         "withdraw" if withdrawn else "delete_batch",
+                         "batch", int(bid), "%s｜%d 张" % (b.get("batch_no"), n))
+        if withdrawn:
+            # 管理员那边可能正等着审，撤回要说一声
+            try:
+                STORE.notify_admins(
+                    "withdraw", "单据 %s 已撤回" % b.get("batch_no"),
+                    "%s 撤回了这张单，不用再审了" % (
+                        user.get("display_name") or user["username"]),
+                    int(bid))
+            except Exception:
+                traceback.print_exc()
+        return self._json({"ok": True, "deleted": n, "withdrawn": withdrawn,
+                           "stats": STORE.stats()})
+
+    def _api_status(self, user):
+        """切换报销状态：0=未报销，1=已报销（仅管理员）"""
+        if not self._is_admin(user):
+            return self._need_admin()
         data = self._json_body()
         rid = data.get("id")
         if not rid:
@@ -654,7 +987,269 @@ class Handler(BaseHTTPRequestHandler):
             return self._err("切换状态失败：%s" % exc, 500)
         return self._json({"ok": True, "record": rec, "stats": STORE.stats()})
 
-    def _api_openfile(self):
+    # ------------------------------------------------------------------
+    # 审核流程
+    # ------------------------------------------------------------------
+    def _api_batch_review(self, user):
+        """管理员审核：通过 / 退回（可勾选有问题的发票）"""
+        if not self._is_admin(user):
+            return self._need_admin()
+        data = self._json_body()
+        bid = data.get("id")
+        action = str(data.get("action") or "").strip()
+        if not bid:
+            return self._err("缺少报销单编号")
+        if action not in ("approve", "return"):
+            return self._err("审核动作只能是 approve 或 return")
+        b = STORE.batch_detail(int(bid))
+        if not b:
+            return self._err("找不到这张报销单", 404)
+        if str(b.get("review_status") or "") != "submitted":
+            return self._err("这张单不是待审核状态，不能重复审核", 409)
+
+        note = str(data.get("note") or "").strip()
+        issues = data.get("issues") or []
+        if action == "return":
+            if not note:
+                return self._err("退回时请写明原因，方便提交人修改")
+            try:
+                issues = [int(x) for x in issues]
+            except (TypeError, ValueError):
+                issues = []
+            status = "returned"
+        else:
+            status = "approved"
+            issues = []
+
+        b = STORE.set_review(int(bid), status, reviewer_id=user["id"],
+                             note=note or None, issues=issues)
+        # 通知提交人
+        owner = b.get("owner_id")
+        if owner:
+            if status == "returned":
+                STORE.add_notification(
+                    owner, "return",
+                    "单据 %s 被退回" % b.get("batch_no"),
+                    note or "请修改后重新提交", int(bid))
+            else:
+                STORE.add_notification(
+                    owner, "approve",
+                    "单据 %s 已通过审核" % b.get("batch_no"),
+                    note or "审核通过，单据已锁定", int(bid))
+        STORE.log_action(user["id"], user["username"],
+                         "review_" + status, "batch", int(bid),
+                         "%s｜%s" % (b.get("batch_no"), note or ""))
+        return self._json({"ok": True, "batch": b,
+                           "stats": STORE.stats()})
+
+    def _api_batch_resubmit(self, user):
+        """用户把「已退回」的单改完后重新提交"""
+        data = self._json_body()
+        bid = data.get("id")
+        if not bid:
+            return self._err("缺少报销单编号")
+        b, err = self._load_batch(bid, user, need_edit=True)
+        if err:
+            return err
+        b = STORE.set_review(int(bid), "submitted", reviewer_id=None,
+                             note=None, issues=[], )
+        try:
+            STORE.notify_admins("submit", "单据 %s 重新提交" % b.get("batch_no"),
+                                "%s 修改后重新提交，请审核" % (user.get("display_name") or user["username"]),
+                                int(bid))
+        except Exception:
+            traceback.print_exc()
+        STORE.log_action(user["id"], user["username"], "resubmit", "batch", int(bid))
+        return self._json({"ok": True, "batch": b})
+
+    # ------------------------------------------------------------------
+    # 消息通知
+    # ------------------------------------------------------------------
+    def _api_notifications(self, user):
+        items = STORE.list_notifications(user["id"])
+        return self._json({"ok": True, "items": items,
+                           "unread": STORE.unread_count(user["id"])})
+
+    def _api_notifications_read(self, user):
+        data = self._json_body()
+        ids = data.get("ids") or []
+        STORE.mark_notifications_read(user["id"], ids or None)
+        return self._json({"ok": True, "unread": STORE.unread_count(user["id"])})
+
+    # ------------------------------------------------------------------
+    # 用户管理（管理员）
+    # ------------------------------------------------------------------
+    def _api_users(self, user):
+        if not self._is_admin(user):
+            return self._need_admin()
+        rows = []
+        for u in STORE.list_users():
+            rows.append({
+                "id": u["id"], "username": u["username"],
+                "display_name": u.get("display_name"),
+                "role": u["role"], "status": int(u["status"] or 0),
+                "created_at": u.get("created_at"),
+                "last_login_at": u.get("last_login_at"),
+            })
+        return self._json({"ok": True, "users": rows})
+
+    def _api_user_create(self, user):
+        if not self._is_admin(user):
+            return self._need_admin()
+        data = self._json_body()
+        username = str(data.get("username") or "").strip()
+        password = str(data.get("password") or "") or auth_mod.new_password(10)
+        display = str(data.get("display_name") or "").strip() or username
+        role = "admin" if data.get("role") == "admin" else "user"
+
+        problem = auth_mod.username_problem(username)
+        if problem:
+            return self._err(problem)
+        if STORE.get_user_by_name(username):
+            return self._err("这个用户名已经被占用了")
+        # 管理员创建的账号，要求首次登录改密
+        uid = STORE.create_user(username, auth_mod.hash_password(password),
+                                display, role=role, must_change_pw=1)
+        STORE.log_action(user["id"], user["username"], "user_create", "user", uid,
+                         "%s（%s）" % (username, role))
+        STORE.add_notification(uid, "account", "账号已开通",
+                               "你的账号由管理员创建，请登录后修改密码")
+        return self._json({"ok": True, "id": uid, "password": password})
+
+    def _api_user_update(self, user):
+        if not self._is_admin(user):
+            return self._need_admin()
+        data = self._json_body()
+        uid = data.get("id")
+        target = STORE.get_user(uid) if str(uid or "").isdigit() else None
+        if not target:
+            return self._err("找不到这个用户", 404)
+
+        fields = {}
+        if "display_name" in data:
+            fields["display_name"] = (str(data.get("display_name") or "").strip()
+                                      or target["username"])
+        if "status" in data:
+            want = 1 if int(data.get("status") or 0) else 0
+            # 不能把自己停用，也不能停用最后一个管理员
+            if int(uid) == int(user["id"]) and want == 0:
+                return self._err("不能停用自己")
+            if target["role"] == "admin" and want == 0 and STORE.count_admins() <= 1:
+                return self._err("这是最后一个管理员，不能停用")
+            fields["status"] = want
+        if "role" in data:
+            want = "admin" if data.get("role") == "admin" else "user"
+            if target["role"] == "admin" and want == "user" and STORE.count_admins() <= 1:
+                return self._err("这是最后一个管理员，不能降级")
+            fields["role"] = want
+
+        STORE.update_user(int(uid), **fields)
+        if fields.get("status") == 0:
+            STORE.delete_user_sessions(int(uid))   # 停用后立刻掉线
+        # 日志写成人话，别把 Python 字典直接塞进去
+        desc = []
+        if "display_name" in fields:
+            desc.append("姓名→%s" % fields["display_name"])
+        if "role" in fields:
+            desc.append("角色→%s" % ("管理员" if fields["role"] == "admin" else "普通用户"))
+        if "status" in fields:
+            desc.append("状态→%s" % ("启用" if fields["status"] else "停用"))
+        STORE.log_action(user["id"], user["username"], "user_update", "user", int(uid),
+                         "%s｜%s" % (target["username"], "，".join(desc) or "无变化"))
+        return self._json({"ok": True})
+
+    def _api_user_reset(self, user):
+        if not self._is_admin(user):
+            return self._need_admin()
+        data = self._json_body()
+        uid = data.get("id")
+        target = STORE.get_user(uid) if str(uid or "").isdigit() else None
+        if not target:
+            return self._err("找不到这个用户", 404)
+        pw = auth_mod.new_password(10)
+        STORE.set_password(int(uid), auth_mod.hash_password(pw), must_change_pw=1)
+        STORE.delete_user_sessions(int(uid))
+        STORE.log_action(user["id"], user["username"], "user_reset_pw", "user", int(uid))
+        STORE.add_notification(int(uid), "account", "密码已被重置",
+                               "管理员重置了你的密码，请用新密码登录")
+        return self._json({"ok": True, "password": pw})
+
+    # ------------------------------------------------------------------
+    # 操作日志
+    # ------------------------------------------------------------------
+    def _api_logs(self, user):
+        if not self._is_admin(user):
+            return self._need_admin()
+        return self._json({"ok": True, "logs": STORE.list_logs(300)})
+
+    # ------------------------------------------------------------------
+    # 数据总览
+    # ------------------------------------------------------------------
+    def _api_stats(self, user):
+        if not self._is_admin(user):
+            return self._need_admin()
+        import datetime as _dt
+        month = _dt.date.today().strftime("%Y-%m")
+        with STORE._conn() as conn:
+            def scalar(sql, args=()):
+                row = conn.execute(sql, args).fetchone()
+                return row[0] if row else 0
+            overview = {
+                "pending": scalar("SELECT COUNT(*) FROM batches "
+                                  "WHERE COALESCE(review_status,'approved')='submitted'"),
+                "returned": scalar("SELECT COUNT(*) FROM batches "
+                                   "WHERE review_status='returned'"),
+                "approved": scalar("SELECT COUNT(*) FROM batches "
+                                   "WHERE review_status='approved'"),
+                "users": scalar("SELECT COUNT(*) FROM users WHERE status=1"),
+                "claims": scalar("SELECT COUNT(*) FROM invoices"),
+                "claims_amount": round(scalar("SELECT COALESCE(SUM(amount),0) FROM invoices"), 2),
+                "month_count": scalar(
+                    "SELECT COUNT(*) FROM invoices "
+                    "WHERE substr(COALESCE(invoice_date, created_at),1,7) = ?", (month,)),
+                "month_amount": round(scalar(
+                    "SELECT COALESCE(SUM(amount),0) FROM invoices "
+                    "WHERE substr(COALESCE(invoice_date, created_at),1,7) = ?", (month,)), 2),
+            }
+            # 平均审核时长（小时）：只算已经通过的单
+            avg_h = conn.execute(
+                "SELECT AVG((julianday(reviewed_at) - julianday(created_at)) * 24) "
+                "FROM batches WHERE review_status = 'approved'"
+                " AND reviewed_at IS NOT NULL AND created_at IS NOT NULL").fetchone()[0]
+            overview["avg_review_hours"] = round(avg_h, 1) if avg_h else 0
+            # 近 12 个月趋势
+            trend = {}
+            for r in conn.execute(
+                    "SELECT substr(COALESCE(invoice_date, created_at),1,7) m, "
+                    " COUNT(*), COALESCE(SUM(amount),0) FROM invoices "
+                    "WHERE m IS NOT NULL AND m <> '' GROUP BY m ORDER BY m"):
+                trend[r[0]] = {"count": r[1], "amount": round(r[2], 2)}
+            months = sorted(trend.keys())[-12:]
+            # 按报销人 / 销售方 TOP 10
+            by_person = [{"name": r[0] or "未填", "count": r[1],
+                          "amount": round(r[2], 2)} for r in conn.execute(
+                "SELECT person, COUNT(*), COALESCE(SUM(amount),0) FROM invoices "
+                "GROUP BY person ORDER BY SUM(amount) DESC LIMIT 10")]
+            by_seller = [{"name": r[0] or "未填", "count": r[1],
+                          "amount": round(r[2], 2)} for r in conn.execute(
+                "SELECT seller, COUNT(*), COALESCE(SUM(amount),0) FROM invoices "
+                "GROUP BY seller ORDER BY SUM(amount) DESC LIMIT 10")]
+            by_audit = []
+            for r in conn.execute("SELECT COALESCE(audit_status,0), COUNT(*) FROM invoices "
+                                  "GROUP BY 1"):
+                by_audit.append({"status": int(r[0]), "count": r[1]})
+        return self._json({
+            "ok": True,
+            "overview": overview,
+            "trend": [{"month": m, **trend[m]} for m in months],
+            "by_person": by_person,
+            "by_seller": by_seller,
+            "by_audit": by_audit,
+        })
+
+    def _api_openfile(self, user):
+        if not self._is_admin(user):
+            return self._need_admin()
         data = self._json_body()
         rid = data.get("id")
         rec = STORE.get(int(rid)) if rid else None
@@ -674,7 +1269,9 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # 发票查验
     # ------------------------------------------------------------------
-    def _api_audit_status(self):
+    def _api_audit_status(self, user):
+        if not self._is_admin(user):
+            return self._need_admin()
         return self._json({
             "ok": True,
             "state": AUDIT_RUNNER.snapshot(),
@@ -719,7 +1316,9 @@ class Handler(BaseHTTPRequestHandler):
                     out.append(r["id"])
         return out
 
-    def _api_audit_start(self):
+    def _api_audit_start(self, user):
+        if not self._is_admin(user):
+            return self._need_admin()
         data = self._json_body()
         try:
             ids = self._pick_audit_ids(data)
@@ -733,13 +1332,18 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"ok": True, "count": len(ids),
                            "state": AUDIT_RUNNER.snapshot()})
 
-    def _api_audit_stop(self):
+    def _api_audit_stop(self, user):
+        if not self._is_admin(user):
+            return self._need_admin()
         AUDIT_RUNNER.stop()
         return self._json({"ok": True, "state": AUDIT_RUNNER.snapshot()})
 
-    def _api_audit_shot(self, qs):
+    def _api_audit_shot(self, qs, user):
         rid = (qs.get("id") or [""])[0]
         rec = STORE.get(int(rid)) if rid.isdigit() else None
+        # 查验结果只给管理员看；用户端不展示截图
+        if not self._is_admin(user):
+            return self._need_admin()
         rel = (rec or {}).get("audit_shot")
         if not rel:
             return self._err("这张发票还没有查验截图", 404)

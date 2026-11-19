@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 数据层
 ------
@@ -39,6 +39,7 @@ COLUMNS = [
     ("audit_msg", "TEXT"),
     ("audit_shot", "TEXT"),
     ("audit_warn", "TEXT"),
+    ("owner_id", "INTEGER"),
     ("created_at", "TEXT"),
     ("updated_at", "TEXT"),
 ]
@@ -55,6 +56,8 @@ MIGRATIONS = [
     ("audit_msg", "TEXT"),                   # 平台返回的说明
     ("audit_shot", "TEXT"),                  # 结果截图相对路径
     ("audit_warn", "TEXT"),                  # 业务提示（抬头/收款人/跨月等）
+    # 多用户（2026-11 新增）
+    ("owner_id", "INTEGER"),                 # 归属用户，NULL=历史数据
 ]
 
 # 报销单
@@ -62,15 +65,31 @@ BATCH_COLUMNS = [
     ("id", "INTEGER PRIMARY KEY AUTOINCREMENT"),
     ("batch_no", "TEXT NOT NULL UNIQUE"),
     ("note", "TEXT"),
+    ("owner_id", "INTEGER"),
+    ("review_status", "TEXT DEFAULT 'submitted'"),  # submitted/returned/approved
+    ("reviewer_id", "INTEGER"),
+    ("reviewed_at", "TEXT"),
+    ("review_note", "TEXT"),
+    ("review_issues", "TEXT"),                      # JSON：[发票id, ...]
     ("created_at", "TEXT"),
     ("updated_at", "TEXT"),
 ]
 
+BATCH_MIGRATIONS = [
+    ("owner_id", "INTEGER"),
+    ("review_status", "TEXT DEFAULT 'submitted'"),
+    ("reviewer_id", "INTEGER"),
+    ("reviewed_at", "TEXT"),
+    ("review_note", "TEXT"),
+    ("review_issues", "TEXT"),
+]
+
 FIELD_NAMES = [c[0] for c in COLUMNS if c[0] != "id"]
 
-# 发票表字段 + 从报销单带出来的单号
+# 发票表字段 + 从报销单带出来的单号/审核状态
 SELECT_INVOICE = (
-    "SELECT i.*, b.batch_no AS batch_no FROM invoices i "
+    "SELECT i.*, b.batch_no AS batch_no, b.review_status AS batch_review, "
+    "b.owner_id AS batch_owner FROM invoices i "
     "LEFT JOIN batches b ON b.id = i.batch_id"
 )
 
@@ -127,6 +146,7 @@ class Store(object):
             os.makedirs(d, exist_ok=True)
         self._clean_tmp()
         self._init_db()
+        self.bootstrap()
         self.backup_daily()
         self.sync_excel()
 
@@ -195,6 +215,7 @@ class Store(object):
             conn.execute("CREATE INDEX IF NOT EXISTS idx_person ON invoices(person)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_date ON invoices(invoice_date)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_batch ON invoices(batch_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_owner ON invoices(owner_id)")
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS persons ("
                 "name TEXT PRIMARY KEY, sort INTEGER DEFAULT 0)"
@@ -204,7 +225,271 @@ class Store(object):
                 "CREATE TABLE IF NOT EXISTS batches (%s)"
                 % ", ".join("%s %s" % (n, t) for n, t in BATCH_COLUMNS)
             )
+            have_b = {r[1] for r in conn.execute("PRAGMA table_info(batches)").fetchall()}
+            for name, ddl in BATCH_MIGRATIONS:
+                if name not in have_b:
+                    conn.execute("ALTER TABLE batches ADD COLUMN %s %s" % (name, ddl))
             conn.execute("CREATE INDEX IF NOT EXISTS idx_batch_no ON batches(batch_no)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_batch_owner ON batches(owner_id)")
+
+            # ---------------- 多用户相关表 ----------------
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS users ("
+                " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " username TEXT NOT NULL UNIQUE,"
+                " password_hash TEXT NOT NULL,"
+                " display_name TEXT,"
+                " role TEXT NOT NULL DEFAULT 'user',"      # admin / user
+                " status INTEGER NOT NULL DEFAULT 1,"      # 1 启用 / 0 停用
+                " must_change_pw INTEGER NOT NULL DEFAULT 0,"
+                " created_at TEXT, last_login_at TEXT)"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS sessions ("
+                " token TEXT PRIMARY KEY,"
+                " user_id INTEGER NOT NULL,"
+                " created_at TEXT, expires_at TEXT, ip TEXT, ua TEXT)"
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sess_user ON sessions(user_id)")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS notifications ("
+                " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " user_id INTEGER NOT NULL,"
+                " kind TEXT,"           # submit / return / approve / account
+                " title TEXT, body TEXT,"
+                " batch_id INTEGER,"
+                " created_at TEXT, read_at TEXT)"
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_notify_user ON notifications(user_id, read_at)")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS audit_logs ("
+                " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " user_id INTEGER, username TEXT,"
+                " action TEXT, target_type TEXT, target_id INTEGER,"
+                " detail TEXT, created_at TEXT)"
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_log_time ON audit_logs(created_at)")
+
+    # ------------------------------------------------------------------
+    # 启动后的一次性整理（需要 python 侧逻辑，所以放在单独方法里）
+    # ------------------------------------------------------------------
+    def bootstrap(self):
+        """
+        建库后的收尾：
+          1. 没有管理员就建一个，随机密码写到 数据/管理员初始密码.txt
+          2. 历史单据（没有 owner）归给管理员，并标成"已通过"
+        """
+        import auth as auth_mod
+
+        admin = self.get_user_by_name("admin")
+        if not admin:
+            pw = auth_mod.new_password(10)
+            self.create_user("admin", auth_mod.hash_password(pw), "管理员",
+                             role="admin", must_change_pw=1)
+            path = os.path.join(self.data_dir, "管理员初始密码.txt")
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("人数发票登记系统 —— 管理员初始密码\n")
+                    f.write("=" * 40 + "\n")
+                    f.write("用户名：admin\n")
+                    f.write("密　码：%s\n\n" % pw)
+                    f.write("第一次登录会被要求修改密码，改完这个文件就可以删掉了。\n")
+                try:
+                    os.chmod(path, 0o600)
+                except OSError:
+                    pass
+            except OSError:
+                pass
+            self._bootstrap_admin_pw = pw
+        else:
+            self._bootstrap_admin_pw = None
+
+        admin = self.get_user_by_name("admin")
+        if admin:
+            # 历史数据归属：只处理一次（owner 为空的才动）
+            with self._conn() as conn:
+                conn.execute(
+                    "UPDATE invoices SET owner_id = ? WHERE owner_id IS NULL", (admin["id"],))
+                conn.execute(
+                    "UPDATE batches SET owner_id = ?, review_status = 'approved',"
+                    " reviewed_at = COALESCE(reviewed_at, created_at)"
+                    " WHERE owner_id IS NULL", (admin["id"],))
+                conn.execute(
+                    "UPDATE batches SET review_status = 'approved'"
+                    " WHERE review_status IS NULL OR review_status = ''")
+            try:
+                self.sync_excel()
+            except Exception:
+                pass
+        return getattr(self, "_bootstrap_admin_pw", None)
+
+    # ------------------------------------------------------------------
+    # 用户
+    # ------------------------------------------------------------------
+    def create_user(self, username, password_hash, display_name=None,
+                    role="user", status=1, must_change_pw=0):
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO users (username, password_hash, display_name, role, status,"
+                " must_change_pw, created_at) VALUES (?,?,?,?,?,?,?)",
+                (username, password_hash, display_name or username, role,
+                 int(status), int(must_change_pw), now_str()))
+            return cur.lastrowid
+
+    def get_user(self, uid):
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM users WHERE id = ?", (int(uid),)).fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_name(self, username):
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM users WHERE username = ?",
+                               (str(username or "").strip(),)).fetchone()
+        return dict(row) if row else None
+
+    def list_users(self):
+        with self._conn() as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT * FROM users ORDER BY role = 'admin' DESC, id").fetchall()]
+        return rows
+
+    def update_user(self, uid, **fields):
+        cols = [k for k in ("display_name", "role", "status", "must_change_pw")
+                if k in fields]
+        if not cols:
+            return self.get_user(uid)
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE users SET %s WHERE id = ?" % ", ".join("%s = ?" % c for c in cols),
+                [fields[c] for c in cols] + [int(uid)])
+        return self.get_user(uid)
+
+    def set_password(self, uid, password_hash, must_change_pw=0):
+        with self._conn() as conn:
+            conn.execute("UPDATE users SET password_hash = ?, must_change_pw = ? WHERE id = ?",
+                         (password_hash, int(must_change_pw), int(uid)))
+
+    def touch_login(self, uid):
+        with self._conn() as conn:
+            conn.execute("UPDATE users SET last_login_at = ? WHERE id = ?",
+                         (now_str(), int(uid)))
+
+    def count_admins(self):
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) c FROM users WHERE role = 'admin' AND status = 1").fetchone()
+        return int(row["c"])
+
+    # ------------------------------------------------------------------
+    # 会话
+    # ------------------------------------------------------------------
+    def create_session(self, user_id, ip=None, ua=None, days=7):
+        import auth as auth_mod
+        token = auth_mod.new_token()
+        now = datetime.datetime.now()
+        expires = now + datetime.timedelta(days=days)
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO sessions (token, user_id, created_at, expires_at, ip, ua)"
+                " VALUES (?,?,?,?,?,?)",
+                (token, int(user_id), now.strftime("%Y-%m-%d %H:%M:%S"),
+                 expires.strftime("%Y-%m-%d %H:%M:%S"), ip or "", (ua or "")[:200]))
+        return token
+
+    def get_session_user(self, token):
+        """令牌 → 用户。过期、停用、不存在都返回 None。"""
+        if not token:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT s.expires_at, u.* FROM sessions s JOIN users u ON u.id = s.user_id"
+                " WHERE s.token = ?", (token,)).fetchone()
+        if not row:
+            return None
+        try:
+            if datetime.datetime.strptime(row["expires_at"], "%Y-%m-%d %H:%M:%S") < datetime.datetime.now():
+                self.delete_session(token)
+                return None
+        except (TypeError, ValueError):
+            return None
+        if int(row["status"] or 0) != 1:
+            return None
+        user = dict(row)
+        user.pop("expires_at", None)
+        user.pop("password_hash", None)
+        return user
+
+    def delete_session(self, token):
+        with self._conn() as conn:
+            conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+
+    def delete_user_sessions(self, user_id):
+        with self._conn() as conn:
+            conn.execute("DELETE FROM sessions WHERE user_id = ?", (int(user_id),))
+
+    def purge_sessions(self):
+        with self._conn() as conn:
+            conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now_str(),))
+
+    # ------------------------------------------------------------------
+    # 消息通知
+    # ------------------------------------------------------------------
+    def add_notification(self, user_id, kind, title, body=None, batch_id=None):
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO notifications (user_id, kind, title, body, batch_id, created_at)"
+                " VALUES (?,?,?,?,?,?)",
+                (int(user_id), kind, title, body, batch_id, now_str()))
+
+    def notify_admins(self, kind, title, body=None, batch_id=None):
+        for u in self.list_users():
+            if u["role"] == "admin" and int(u["status"] or 0) == 1:
+                self.add_notification(u["id"], kind, title, body, batch_id)
+
+    def list_notifications(self, user_id, limit=200):
+        with self._conn() as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT * FROM notifications WHERE user_id = ?"
+                " ORDER BY id DESC LIMIT ?", (int(user_id), limit)).fetchall()]
+        return rows
+
+    def unread_count(self, user_id):
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) c FROM notifications WHERE user_id = ? AND read_at IS NULL",
+                (int(user_id),)).fetchone()
+        return int(row["c"])
+
+    def mark_notifications_read(self, user_id, ids=None):
+        stamp = now_str()
+        with self._conn() as conn:
+            if ids:
+                q = ",".join("?" for _ in ids)
+                conn.execute(
+                    "UPDATE notifications SET read_at = ? WHERE user_id = ? AND id IN (%s)"
+                    " AND read_at IS NULL" % q,
+                    [stamp, int(user_id)] + [int(i) for i in ids])
+            else:
+                conn.execute(
+                    "UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL",
+                    (stamp, int(user_id)))
+
+    # ------------------------------------------------------------------
+    # 操作日志
+    # ------------------------------------------------------------------
+    def log_action(self, user_id, username, action, target_type=None,
+                   target_id=None, detail=None):
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO audit_logs (user_id, username, action, target_type, target_id,"
+                " detail, created_at) VALUES (?,?,?,?,?,?,?)",
+                (user_id, username, action, target_type, target_id, detail, now_str()))
+
+    def list_logs(self, limit=300):
+        with self._conn() as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()]
+        return rows
 
     # ------------------------------------------------------------------
     # 查询
@@ -224,7 +509,8 @@ class Store(object):
         return dict(row) if row else None
 
     def list(self, q=None, person=None, month=None, status=None, batch_id=None,
-             audit=None, sort="invoice_date", desc=True, limit=5000):
+             audit=None, owner_id=None, review_status=None,
+             sort="invoice_date", desc=True, limit=5000):
         where, args = [], []
         if q:
             like = "%" + q.strip() + "%"
@@ -249,6 +535,12 @@ class Store(object):
         elif str(audit) == "unchecked":
             # 未查验 + 查验失败（可以重查的）
             where.append("COALESCE(i.audit_status, 0) IN (0, 2)")
+        if owner_id not in (None, ""):
+            where.append("i.owner_id = ?")
+            args.append(int(owner_id))
+        if review_status:
+            where.append("COALESCE(b.review_status, 'approved') = ?")
+            args.append(str(review_status))
         if batch_id not in (None, "", "all"):
             if str(batch_id) == "none":
                 where.append("i.batch_id IS NULL")
@@ -270,33 +562,44 @@ class Store(object):
             rows = [dict(r) for r in conn.execute(sql, args).fetchall()]
         return rows
 
-    def stats(self):
+    def stats(self, owner_id=None):
         today = datetime.date.today()
         month = today.strftime("%Y-%m")
         year = today.strftime("%Y")
+        # 普通用户只看自己的数据：所有统计都加一个 owner 过滤
+        where = ""
+        wargs = ()
+        if owner_id not in (None, ""):
+            where = " WHERE owner_id = ?"
+            wargs = (int(owner_id),)
         out = {}
         with self._conn() as conn:
             for key, pat in (("month", month), ("year", year)):
                 row = conn.execute(
                     "SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM invoices "
                     "WHERE substr(COALESCE(invoice_date, created_at),1,%d) = ?"
-                    % len(pat), (pat,)
+                    % len(pat) + (" AND owner_id = ?" if where else ""),
+                    (pat,) + wargs
                 ).fetchone()
                 out[key] = {"count": row["c"], "amount": round(row["s"], 2)}
             row = conn.execute(
-                "SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM invoices"
+                "SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM invoices" + where,
+                wargs
             ).fetchone()
             out["total"] = {"count": row["c"], "amount": round(row["s"], 2)}
             for key, val in (("unpaid", 0), ("paid", 1)):
                 row = conn.execute(
                     "SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM invoices "
-                    "WHERE COALESCE(status,0) = ?", (val,)
+                    "WHERE COALESCE(status,0) = ?" + (" AND owner_id = ?" if where else ""),
+                    (val,) + wargs
                 ).fetchone()
                 out[key] = {"count": row["c"], "amount": round(row["s"], 2)}
             # 报销单维度
+            o_join = ("  WHERE b.owner_id = %d" % int(owner_id)) if where else ""
             row = conn.execute(
                 "SELECT COUNT(*) c FROM ("
                 "  SELECT b.id FROM batches b JOIN invoices i ON i.batch_id = b.id "
+                + o_join +
                 "  GROUP BY b.id "
                 "  HAVING COALESCE(SUM(COALESCE(i.status,0)),0) < COUNT(i.id))"
             ).fetchone()
@@ -304,26 +607,30 @@ class Store(object):
             row = conn.execute(
                 "SELECT COUNT(*) c FROM ("
                 "  SELECT b.id FROM batches b JOIN invoices i ON i.batch_id = b.id "
+                + o_join +
                 "  GROUP BY b.id)"
             ).fetchone()
             out["batches"] = row["c"]
             # 查验结果分布（前端顶栏/徽章用）
             aud = {0: 0, 1: 0, 2: 0, 3: 0}
             for r in conn.execute(
-                    "SELECT COALESCE(audit_status,0) s, COUNT(*) c FROM invoices GROUP BY s"):
+                    "SELECT COALESCE(audit_status,0) s, COUNT(*) c FROM invoices"
+                    + where + " GROUP BY s", wargs):
                 aud[int(r[0] or 0)] = int(r["c"])
             out["audit"] = aud
             row = conn.execute(
                 "SELECT COUNT(*) c FROM invoices "
-                "WHERE audit_warn IS NOT NULL AND audit_warn <> ''").fetchone()
+                "WHERE audit_warn IS NOT NULL AND audit_warn <> ''"
+                + (" AND owner_id = ?" if where else ""), wargs).fetchone()
             out["audit_warn"] = int(row["c"])
             # 按月统计查验情况（最近 6 个月），给界面上的"查验概况"用
             by_month = {}
             for r in conn.execute(
                     "SELECT substr(COALESCE(invoice_date, created_at),1,7) m, "
                     "       COALESCE(audit_status,0) s, COUNT(*) c "
-                    "FROM invoices WHERE m IS NOT NULL AND m <> '' "
-                    "GROUP BY m, s ORDER BY m"):
+                    "FROM invoices WHERE m IS NOT NULL AND m <> ''"
+                    + (" AND owner_id = ?" if where else "") +
+                    " GROUP BY m, s ORDER BY m", wargs):
                 by_month.setdefault(r["m"], {0: 0, 1: 0, 2: 0, 3: 0})
                 by_month[r["m"]][int(r["s"] or 0)] = int(r["c"])
             out["audit_by_month"] = [
@@ -424,17 +731,22 @@ class Store(object):
                 n = 1
         return "%s%03d" % (prefix, n)
 
-    def create_batch(self, batch_no=None, note=None):
-        """新建一张报销单。单号可指定，重复会自动加后缀。"""
+    def create_batch(self, batch_no=None, note=None, owner_id=None,
+                     review_status="submitted"):
+        """
+        新建一张报销单。单号可指定，重复会自动加后缀。
+        owner_id = 提交人；review_status 默认 submitted（待审核）。
+        """
         want = (batch_no or "").strip()
+        stamp = now_str()
         if not want:
             for _ in range(60):
                 try:
                     with self._conn() as conn:
                         cur = conn.execute(
-                            "INSERT INTO batches (batch_no, note, created_at, updated_at) "
-                            "VALUES (?,?,?,?)",
-                            (self.next_batch_no(), note, now_str(), now_str()))
+                            "INSERT INTO batches (batch_no, note, owner_id, review_status,"
+                            " created_at, updated_at) VALUES (?,?,?,?,?,?)",
+                            (self.next_batch_no(), note, owner_id, review_status, stamp, stamp))
                         return cur.lastrowid
                 except sqlite3.IntegrityError:
                     continue
@@ -444,8 +756,9 @@ class Store(object):
             try:
                 with self._conn() as conn:
                     cur = conn.execute(
-                        "INSERT INTO batches (batch_no, note, created_at, updated_at) "
-                        "VALUES (?,?,?,?)", (no, note, now_str(), now_str()))
+                        "INSERT INTO batches (batch_no, note, owner_id, review_status,"
+                        " created_at, updated_at) VALUES (?,?,?,?,?,?)",
+                        (no, note, owner_id, review_status, stamp, stamp))
                     return cur.lastrowid
             except sqlite3.IntegrityError:
                 continue
@@ -478,7 +791,8 @@ class Store(object):
         b["paid_at"] = first.get("paid_at")
         return b
 
-    def list_batches(self, q=None, status=None, person=None, limit=2000):
+    def list_batches(self, q=None, status=None, person=None, owner_id=None,
+                     review_status=None, limit=2000):
         sql = ("SELECT b.*, COUNT(i.id) AS count, COALESCE(SUM(i.amount),0) AS amount, "
                "COALESCE(SUM(COALESCE(i.status,0)),0) AS paid_count, "
                "MIN(i.person) AS person, MIN(i.payee) AS payee, "
@@ -492,6 +806,12 @@ class Store(object):
         if person:
             where.append("i.person = ?")
             args.append(person)
+        if owner_id not in (None, ""):
+            where.append("b.owner_id = ?")
+            args.append(int(owner_id))
+        if review_status:
+            where.append("COALESCE(b.review_status,'approved') = ?")
+            args.append(str(review_status))
         if where:
             sql += " WHERE " + " AND ".join(where)
         sql += " GROUP BY b.id ORDER BY b.id DESC LIMIT ?"
@@ -507,6 +827,46 @@ class Store(object):
                 continue
             out.append(r)
         return out
+
+    def set_review(self, bid, status, reviewer_id=None, note=None, issues=None):
+        """
+        写审核结果。
+        status: submitted / returned / approved
+        issues: 有问题的发票 id 列表（退回时用），存 JSON
+        """
+        import json as _json
+        stamp = now_str()
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE batches SET review_status = ?, reviewer_id = ?, reviewed_at = ?,"
+                " review_note = ?, review_issues = ?, updated_at = ? WHERE id = ?",
+                (status, reviewer_id, stamp, note,
+                 _json.dumps(issues or [], ensure_ascii=False) if issues is not None else None,
+                 stamp, int(bid)))
+        return self.batch_detail(bid)
+
+    def review_issues(self, batch):
+        """把库里存的 issues JSON 解析出来。"""
+        import json as _json
+        raw = (batch or {}).get("review_issues")
+        if not raw:
+            return []
+        try:
+            v = _json.loads(raw)
+            return [int(x) for x in v] if isinstance(v, list) else []
+        except Exception:
+            return []
+
+    def count_pending_reviews(self, owner_id=None):
+        """待审核单据数（管理员首页红点用）。"""
+        sql = ("SELECT COUNT(*) c FROM batches WHERE COALESCE(review_status,'approved') = 'submitted'")
+        args = []
+        if owner_id not in (None, ""):
+            sql += " AND owner_id = ?"
+            args.append(int(owner_id))
+        with self._conn() as conn:
+            row = conn.execute(sql, args).fetchone()
+        return int(row["c"])
 
     def set_batch_status(self, bid, status):
         """整单标记已报销 / 未报销"""
@@ -553,10 +913,11 @@ class Store(object):
         return self.batch_detail(bid)
 
     def add_batch(self, items, batch_no=None, note=None, person=None, payee=None,
-                  reimburse_date=None):
+                  reimburse_date=None, owner_id=None, review_status="submitted"):
         """
         一次性登记多张发票并归入同一张报销单。
         items: [(字段字典, 临时文件路径), ...]
+        owner_id: 提交人（普通用户提交时必带）
         先全部校验，任何一张有问题就整批不落库。
         """
         seen, clean = set(), []
@@ -572,12 +933,14 @@ class Store(object):
                 raise DuplicateError(exist)
             clean.append((no, data, tmp_file))
 
-        bid = self.create_batch(batch_no, note)
+        bid = self.create_batch(batch_no, note, owner_id=owner_id,
+                                review_status=review_status)
         ids = []
         for no, data, tmp_file in clean:
             d = dict(data)
             d["invoice_no"] = no
             d["batch_id"] = bid
+            d["owner_id"] = owner_id
             if person:
                 d["person"] = person
             if payee:
@@ -588,7 +951,8 @@ class Store(object):
         self.sync_excel()
         return bid, ids
 
-    def attach_to_batch(self, invoice_ids, batch_id=None, batch_no=None, note=None):
+    def attach_to_batch(self, invoice_ids, batch_id=None, batch_no=None, note=None,
+                        owner_id=None):
         """把已登记的发票补挂到某张报销单；不指定就新建一张。"""
         ids = [int(x) for x in (invoice_ids or [])]
         if not ids:
@@ -601,7 +965,8 @@ class Store(object):
                 if r["batch_id"]:
                     old_batches.add(int(r["batch_id"]))
         if not batch_id:
-            batch_id = self.create_batch(batch_no, note)
+            batch_id = self.create_batch(batch_no, note, owner_id=owner_id,
+                                         review_status="submitted")
         else:
             batch_id = int(batch_id)
             if not self.get_batch(batch_id):
@@ -718,6 +1083,20 @@ class Store(object):
             self.add_person(rec["person"])
         self.sync_excel()
 
+    def delete_batch(self, bid):
+        """整单删除：先把单里的发票逐张归档删除，再清掉单据本身。"""
+        bid = int(bid)
+        with self._conn() as conn:
+            ids = [int(r["id"]) for r in conn.execute(
+                "SELECT id FROM invoices WHERE batch_id = ? ORDER BY id", (bid,))]
+        for rid in ids:
+            self.delete(rid)
+        # _prune_batches 通常已经把空单删掉了，这里再兜一次
+        with self._conn() as conn:
+            conn.execute("DELETE FROM batches WHERE id = ?", (bid,))
+        self.sync_excel()
+        return len(ids)
+
     def delete(self, rid):
         rec = self.get(rid)
         if not rec:
@@ -769,7 +1148,7 @@ class Store(object):
     # ------------------------------------------------------------------
     # Excel 同步 / 导出
     # ------------------------------------------------------------------
-    def sync_excel(self, dest=None):
+    def sync_excel(self, dest=None, owner_id=None):
         dest = dest or self.xlsx_path
         try:
             from openpyxl import Workbook
@@ -777,7 +1156,7 @@ class Store(object):
             from openpyxl.utils import get_column_letter
         except ImportError:
             return
-        rows = self.list(sort="created_at", desc=False, limit=100000)
+        rows = self.list(sort="created_at", desc=False, limit=100000, owner_id=owner_id)
         wb = Workbook()
         ws = wb.active
         ws.title = "发票台账"
