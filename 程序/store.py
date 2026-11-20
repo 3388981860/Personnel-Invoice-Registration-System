@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 数据层
 ------
@@ -10,6 +10,7 @@
 """
 import os
 import re
+import contextlib
 import shutil
 import sqlite3
 import datetime
@@ -168,10 +169,32 @@ class Store(object):
     # ------------------------------------------------------------------
     # 基础
     # ------------------------------------------------------------------
+    @contextlib.contextmanager
     def _conn(self):
+        """
+        一次查询一个连接，用完立刻关。
+
+        注意：写 `with self._conn() as conn:` 时，sqlite3 的 with 只负责
+        commit / rollback，**不会关连接**；连接要等垃圾回收才释放。
+        服务跑久了、请求多了，文件句柄就会攒着不放，最后满屏
+        `Too many open files`。这里显式关掉，句柄用完即还。
+        """
         conn = sqlite3.connect(self.db_path, timeout=15)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def rel_path(self, rel):
         """

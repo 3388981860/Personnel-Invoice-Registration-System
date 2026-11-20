@@ -4,13 +4,55 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>登录 · 人数发票登记台账</title>
-<link rel="stylesheet" href="/static/style.css">
+<script>
+/* 首屏渲染前先套用上次选的配色，避免闪一下默认色 */
+(function () {
+    try {
+        var t = localStorage.getItem('invoice-skin');
+        if (t === 'a' || t === 'b' || t === 'c') {
+            document.documentElement.setAttribute('data-theme', t);
+        }
+    } catch (e) {}
+})();
+</script><link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="login-body">
 
+<!-- 背景装饰：圆弧 / 印章 / 天际线 -->
+<svg class="arc arc1" width="440" height="440" viewBox="0 0 440 440" aria-hidden="true">
+    <circle cx="220" cy="220" r="210" fill="none" stroke="rgba(200,164,92,0.18)" stroke-width="1"/>
+    <circle cx="220" cy="220" r="168" fill="none" stroke="rgba(200,164,92,0.14)" stroke-width="1"/>
+    <circle cx="220" cy="220" r="126" fill="none" stroke="rgba(200,164,92,0.10)" stroke-width="1"/>
+    <circle cx="220" cy="220" r="84" fill="none" stroke="rgba(200,164,92,0.08)" stroke-width="1"/>
+    <circle cx="220" cy="220" r="42" fill="none" stroke="rgba(200,164,92,0.06)" stroke-width="1"/>
+</svg>
+<svg class="arc arc2" width="380" height="380" viewBox="0 0 380 380" aria-hidden="true">
+    <circle cx="190" cy="190" r="180" fill="none" stroke="rgba(255,255,255,0.09)" stroke-width="1"/>
+    <circle cx="190" cy="190" r="140" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+    <circle cx="190" cy="190" r="100" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+    <circle cx="190" cy="190" r="60" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+</svg>
+<svg class="seal" viewBox="0 0 130 130" aria-hidden="true">
+    <defs><path id="seal-circ" d="M65,14 A51,51 0 1,1 64.99,14"/></defs>
+    <circle cx="65" cy="65" r="60" fill="none" stroke="#C8A45C" stroke-width="2"/>
+    <circle cx="65" cy="65" r="52" fill="none" stroke="#C8A45C" stroke-width="1"/>
+    <text fill="#C8A45C" font-size="8.5" letter-spacing="2.5">
+        <textPath href="#seal-circ">人数发票登记台账 · INVOICE REGISTRATION SYSTEM · </textPath>
+    </text>
+    <text x="65" y="62" text-anchor="middle" fill="#C8A45C" font-size="22" font-weight="700">票</text>
+    <text x="65" y="82" text-anchor="middle" fill="#C8A45C" font-size="7.5" letter-spacing="2">登记台账</text>
+</svg>
+<svg class="skyline" viewBox="0 0 1000 90" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,90 L0,52 L36,52 L36,38 L72,38 L72,58 L108,58 L108,28 L144,28 L144,48 L180,48 L180,22 L216,22 L216,42 L252,42 L252,32 L288,32 L288,54 L324,54 L324,18 L360,18 L360,46 L396,46 L396,36 L432,36 L432,58 L468,58 L468,26 L504,26 L504,42 L540,42 L540,22 L576,22 L576,52 L612,52 L612,32 L648,32 L648,48 L684,48 L684,16 L720,16 L720,42 L756,42 L756,58 L792,58 L792,28 L828,28 L828,48 L864,48 L864,36 L900,36 L900,54 L936,54 L936,28 L972,28 L972,46 L1000,46 L1000,90 Z" fill="#0A1A2F"/>
+</svg>
+<div class="login-divider" aria-hidden="true"></div>
+
 <div class="login-wrap">
     <div class="login-card">
-        <div class="login-brand"><span class="logo">票</span>人数发票登记台账</div>
+        <div class="login-brand">
+            <span class="logo">票</span>
+            <div><b>人数发票登记台账</b><span>INVOICE REGISTRATION SYSTEM</span></div>
+        </div>
 
         <!-- 登录 -->
         <form id="loginForm" class="login-form" autocomplete="on">
@@ -65,6 +107,7 @@
             </div>
         </form>
     </div>
+    <div class="login-copy">© 2026 人数发票登记台账 · 温州信宇科技 · <b>构建 20261119</b></div>
 </div>
 
 <script>

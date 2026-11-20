@@ -416,3 +416,68 @@ Windows 单机版直接双击 `工具\重置密码.bat`。
 自己改密码请用顶栏的「改密码」（需要原密码，不会掉线）。
 
 （新版本里自己那一行已经不显示「重置密码」了，只剩「改密码」。）
+
+---
+
+## 8. 网页打不开：Too many open files
+
+页面变成 `读不到网页文件 login.html（Too many open files）`，说明**服务进程的文件句柄用光了**。
+这**不是权限问题**，不要 chown。
+
+### 8.1 立刻恢复
+
+```bash
+sudo systemctl restart invoice-ledger
+sudo pkill -f ms-playwright        # 顺手清掉可能残留的浏览器进程
+```
+
+### 8.2 根治（两处，都要做）
+
+**① systemd 调大句柄上限**
+
+```bash
+sudo systemctl edit invoice-ledger
+```
+
+在打开的编辑器里填：
+
+```ini
+[Service]
+LimitNOFILE=65536
+TasksMax=4096
+```
+
+保存后：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart invoice-ledger
+```
+
+确认生效：
+
+```bash
+systemctl show invoice-ledger -p LimitNOFILE
+# 应该输出 LimitNOFILE=65536
+```
+
+**② store.py 的连接必须关**
+
+2026-11-20 已修：`_conn()` 现在是上下文管理器，`commit/rollback` 之后
+`finally` 里一定 `close()`。升级时确认 `程序/store.py` 是新版即可。
+
+### 8.3 怎么看现在用了多少
+
+```bash
+curl -s http://127.0.0.1:8765/_health
+# ok fd=123/65536                     正常
+# ok fd=60000/65536 WARN 句柄快用完了  该重启了
+```
+
+启动日志里也有一行「文件句柄：已用 x / 上限 y」。
+
+### 8.4 为什么会被吃光
+
+- 每次页面操作要打好几个接口，旧版每个接口都留一个 SQLite 连接不关
+- 查验功能会拉起 Chromium，一个浏览器进程占几百个句柄
+- 默认上限只有 1024，跑几天就满

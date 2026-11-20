@@ -75,6 +75,10 @@ CONFIG = {
     "retries": 2,              # 单张发票整体重试次数
     "captcha_tries": 6,        # 连续识别不出验证码时的尝试次数
     "captcha_rounds": 4,       # 验证码被平台判错后，最多重来几轮
+    # 超过这个秒数还打不开查验平台，就当网络不通，直接给结论，别一直挂着
+    "page_timeout": 25,
+    # 单张发票的总预算（秒）。超了就放弃这张，避免"点了一下半天没反应"
+    "invoice_timeout": 180,
     "browser_path": "",        # 指定 chrome.exe 全路径；留空=用 Playwright 自己找
     # 无头模式下必须伪装成普通 Chrome 的 UA：查验网关会直接拒掉 HeadlessChrome，
     # 表现是验证码接口 net::ERR_FAILED。留空 = 按实际浏览器主版本自动生成。
@@ -672,45 +676,97 @@ def _judge(data):
     return AUDIT_NONE, "未识别的查验结果：%s" % (msg or code)
 
 
-def _verify_once(page, query, sel, recognizer, color_parser):
-    """返回 (status, msg, result_text)"""
-    page.goto(sel["url"], wait_until="domcontentloaded", timeout=60000)
-    page.set_viewport_size({"width": CONFIG["viewport_width"],
-                            "height": CONFIG["viewport_height"]})
+class _Abort(Exception):
+    """用户点了停止，或者这张发票超时了 —— 用来从半路跳出来"""
+
+
+def _verify_once(page, query, sel, recognizer, color_parser, log=None, abort=None):
+    """返回 (status, msg, result_text, data)
+
+    log    : 每走一步写一行进度，界面上能看见"卡在哪一步"
+    abort  : 返回 None 表示继续，返回 'stop' / 'timeout' 表示立刻放弃
+    """
+    say = log or (lambda _t: None)
+    page_ms = int(CONFIG.get("page_timeout", 25)) * 1000
+
+    def check_abort():
+        """停止/超时就抛出去，别把"页面被关掉"当成网络故障"""
+        if abort:
+            why = abort()
+            if why:
+                raise _Abort(why)
+
+    def step(text):
+        check_abort()
+        say(text)
+
+    step("打开查验页面…")
+    try:
+        page.goto(sel["url"], wait_until="domcontentloaded", timeout=page_ms)
+    except Exception as exc:
+        check_abort()
+        name = type(exc).__name__
+        head = str(exc).strip().splitlines()[0] if str(exc).strip() else name
+        if "Timeout" in name or "Timeout" in head[:120]:
+            return (AUDIT_NONE,
+                    "查验平台打不开（等了 %d 秒没响应）——多半是这台电脑连不上外网，"
+                    "或者平台正在维护" % (page_ms // 1000), "", None)
+        net = ("ERR_CONNECTION", "ERR_NAME_NOT_RESOLVED", "ERR_INTERNET_DISCONNECTED",
+               "ERR_TIMED_OUT", "ERR_PROXY", "ERR_EMPTY_RESPONSE", "ERR_ADDRESS")
+        if any(k in head for k in net):
+            return (AUDIT_NONE,
+                    "查验平台打不开（网络不通：%s）——请确认这台电脑能上外网，"
+                    "或让 IT 放开 inv-veri.chinatax.gov.cn"
+                    % head.split(" at ")[0], "", None)
+        return AUDIT_NONE, "查验平台打不开：%s" % head[:100], "", None
+
+    try:
+        page.set_viewport_size({"width": CONFIG["viewport_width"],
+                                "height": CONFIG["viewport_height"]})
+    except Exception:
+        pass
 
     # 等表单渲染完（单页应用，DOM 是异步出来的）
+    step("页面已打开，等待表单加载…")
     try:
-        page.locator(sel["fphm"]).first.wait_for(state="visible", timeout=30000)
+        page.locator(sel["fphm"]).first.wait_for(state="visible", timeout=page_ms)
     except Exception:
-        return AUDIT_NONE, "查验平台没有打开（表单没出来，可能是网络或改版）", ""
+        check_abort()
+        return (AUDIT_NONE,
+                "查验平台没有打开（表单 %d 秒没出来，可能是网络慢或平台改版）"
+                % (page_ms // 1000), "", None)
 
+    step("填写发票号码 / 开票日期 / 金额…")
     ok, msg = _fill_form(page, query, sel)
     if not ok:
-        return AUDIT_NONE, msg, ""
+        return AUDIT_NONE, msg, "", None
 
     for _round in range(CONFIG["captcha_rounds"]):
         text = ""
-        for _ in range(CONFIG["captcha_tries"]):
+        for _try in range(CONFIG["captcha_tries"]):
+            step("识别验证码（第 %d 轮 · 第 %d 次）…" % (_round + 1, _try + 1))
             text = _solve_captcha(page, sel, recognizer, color_parser)
             if text:
                 break
             time.sleep(0.8)
         if not text:
-            return AUDIT_NONE, "验证码连续识别失败", ""
+            return AUDIT_NONE, "验证码连续识别失败（图片太糊或模型没加载）", "", None
 
         try:
             page.locator(sel["yzm"]).fill(text, timeout=10000)
         except Exception:
-            return AUDIT_NONE, "验证码填不进去", ""
+            return AUDIT_NONE, "验证码填不进去（页面结构可能变了）", "", None
 
+        step("提交查验，等待平台返回…")
         data, err = _submit(page, sel)
         if data is None:
-            return AUDIT_NONE, err, ""
+            return AUDIT_NONE, err, "", None
 
         status, msg = _judge(data)
         if status is None:          # 验证码错了，再来一轮
             # 只关弹窗，不主动刷新：下一轮 _solve_captcha 自己会点图片，
             # 这里多点一次会让"抓到的验证码"和"页面显示的验证码"错位。
+            say("验证码被平台判错，换一张重试…")
             _dismiss_popup(page, sel)
             time.sleep(1.5)
             continue
@@ -719,6 +775,7 @@ def _verify_once(page, query, sel, recognizer, color_parser):
             return status, msg, "", data
 
         # 通过：等结果弹窗出来，拿文字（截图在 _one 里做）
+        step("查验通过，读取结果…")
         for _ in range(20):
             if _result_ready(page, sel):
                 break
@@ -866,6 +923,7 @@ class Runner(object):
         self.thread = None
         self.stop_flag = threading.Event()
         self.state = self._empty()
+        self._page = None      # 当前正在用的页面，停止时直接关掉
 
     @staticmethod
     def _empty():
@@ -904,7 +962,14 @@ class Runner(object):
     def stop(self):
         self.stop_flag.set()
         with self.lock:
-            self._log_locked("收到停止指令，当前这张处理完就停")
+            self._log_locked("收到停止指令，正在中断当前这张…")
+        # 光设标志位不够：页面卡在 goto / 等待元素上时，要把它关掉才能立刻中断
+        page = self._page
+        if page is not None:
+            try:
+                page.close()
+            except Exception:
+                pass
 
     # ---------------- 内部 ----------------
     def _log(self, text):
@@ -1020,12 +1085,32 @@ class Runner(object):
 
         status, msg, shot, warn = AUDIT_NONE, "查验失败", None, ""
         backoff_i = 0
+        # 这张发票的总预算：超时就放弃，免得界面上"点了半天没反应"
+        budget = float(CONFIG.get("invoice_timeout", 180))
+        deadline = time.time() + budget
+
+        def abort():
+            if self.stop_flag.is_set():
+                return "stop"
+            if time.time() > deadline:
+                return "timeout"
+            return None
+
         for attempt in range(CONFIG["retries"]):
             page = None
+            if abort() == "stop":
+                break
+            if abort() == "timeout":
+                if attempt == 0:
+                    msg = "查验超时（%d 秒没结果），已放弃这张" % int(budget)
+                    self._log(msg)
+                break
             try:
                 page = new_page(browser)
-                status, msg, _body, data = _verify_once(page, query, sel,
-                                                         recognizer, color_parser)
+                self._page = page          # 让 stop() 能把卡住的页面直接关掉
+                status, msg, _body, data = _verify_once(
+                    page, query, sel, recognizer, color_parser,
+                    log=self._log, abort=abort)
 
                 if status == AUDIT_PASS and data:
                     # 台账 vs 平台 逐项比对：号码/日期/价税合计对不上，就不算通过
@@ -1056,7 +1141,25 @@ class Runner(object):
                     backoff_i += 1
                     continue
                 break
+            except _Abort as exc:
+                # 用户点了停止 / 这张超时：不再重试，直接收尾
+                if str(exc) == "stop":
+                    msg = "已停止"
+                    self._log("已停止，%s 未查验" % no)
+                else:
+                    msg = "查验超时（%d 秒没结果），已放弃这张" % int(budget)
+                    self._log(msg)
+                break
             except Exception as exc:
+                why = abort()
+                if why == "stop":
+                    msg = "已停止"
+                    self._log("已停止，%s 未查验" % no)
+                    break
+                if why == "timeout":
+                    msg = "查验超时（%d 秒没结果），已放弃这张" % int(budget)
+                    self._log(msg)
+                    break
                 msg = "查验出错：%s" % str(exc)[:120]
                 self._log("%s 第 %d 次出错：%s" % (no, attempt + 1, str(exc)[:300]))
             finally:

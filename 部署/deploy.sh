@@ -191,6 +191,10 @@ ${AUTH_LINE}
 ExecStart=${PY} ${APP_DIR}/程序/server.py --host ${HOST} --port ${PORT} --no-browser
 Restart=on-failure
 RestartSec=5
+# 查验要拉起 Chromium，一个浏览器进程就占几百个文件句柄；
+# 默认 1024 很容易被吃光，吃光后网页都打不开（报 Too many open files）
+LimitNOFILE=65536
+TasksMax=4096
 # 浏览器进程需要 /tmp 和共享内存
 PrivateTmp=false
 NoNewPrivileges=false

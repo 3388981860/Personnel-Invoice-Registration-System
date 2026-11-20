@@ -445,12 +445,16 @@ function loadList() {
 function renderStats(s) {
     if (!s) return;
     var un = s.unpaid || { count: 0, amount: 0 };
+    function stat(v, unit, label, cls) {
+        return '<div class="tb-stat' + (cls ? ' ' + cls : '') + '">' +
+            '<b>' + v + '</b><span class="u">' + unit + '</span>' + label + '</div>';
+    }
     $('stats').innerHTML =
-        '<span class="todo">待报销 <b>' + (s.unpaid_batches || 0) + '</b> 单 / <b>' + un.count +
-        '</b> 张　合计 <span class="money">' + moneyY(un.amount) + '</span></span>' +
-        '<span>本月 <b>' + s.month.count + '</b> 张　合计 <span class="money">' + moneyY(s.month.amount) + '</span></span>' +
-        '<span>本年 <b>' + s.year.count + '</b> 张　合计 <span class="money">' + moneyY(s.year.amount) + '</span></span>' +
-        '<span>累计 <b>' + s.total.count + '</b> 张　合计 <span class="money">' + moneyY(s.total.amount) + '</span></span>';
+        stat(s.unpaid_batches || 0, '单', '待报销') +
+        stat(un.count, '张', moneyY(un.amount)) +
+        stat(s.month.count, '张', '本月') +
+        stat(s.year.count, '张', '本年') +
+        stat(s.total.count, '张', '累计');
     renderAuditStat(s);
 }
 
@@ -1802,6 +1806,7 @@ $('q').addEventListener('input', function () {
     $(k).addEventListener('change', function () { state.page = 1; loadList(); });
 });
 $('refresh').addEventListener('click', loadList);
+$('btnExport').addEventListener('click', function () { exportExcel(); });
 
 /* 分页 */
 $('pgPrev').addEventListener('click', function () { gotoPage(state.page - 1); });
@@ -1863,20 +1868,96 @@ function toggleUserMenu(open) {
     if (btn) btn.classList.toggle('open', show);
 }
 
+/* 账号设置弹窗：账号信息只读 + 就地改密码（对应设计稿第 11 屏） */
 function openAccountDialog() {
     var me = state.me || {};
-    openDialog({
-        title: '账号设置',
-        text: '账号：' + (me.username || '') + '\n' +
-              '姓名：' + (me.display_name || me.username || '') + '\n' +
-              '角色：' + (isAdmin() ? '管理员（可审核、管用户）' : '普通用户（只提交自己的）') +
-              '\n\n要换密码请点下面的按钮。',
-        ok: '修改密码',
-        cancel: '关闭'
-    }).then(function (r) {
-        if (r) openPasswordDialog();
+    var name = me.display_name || me.username || '—';
+    $('acctAvatar').textContent = String(name).slice(0, 1);
+    $('acctName').innerHTML = esc(name) +
+        ' <span class="tag ' + (isAdmin() ? 'blue' : 'grey') + '">' +
+        (isAdmin() ? '管理员' : '用户') + '</span>';
+    $('acctMeta').textContent =
+        (me.username || '') + ' · 构建 ' + (state.build || '—') +
+        ' · 最近登录 ' + (fmtTime(me.last_login_at) || '从未登录');
+
+    $('acctInfo').innerHTML = [
+        ['用户名', '<b class="mono">' + esc(me.username || '') + '</b>'],
+        ['姓名', esc(name)],
+        ['角色', isAdmin() ? '管理员' : '普通用户'],
+        ['状态', '<span class="tag ' + (me.status ? 'ok' : 'bad') + '">' +
+                 (me.status ? '启用' : '停用') + '</span>'],
+        ['账号创建', esc((me.created_at || '').slice(0, 10) || '—')],
+        ['最近登录', esc(fmtTime(me.last_login_at) || '从未登录')]
+    ].map(function (row) {
+        return '<div class="acct-item"><span>' + row[0] + '</span><b>' + row[1] + '</b></div>';
+    }).join('');
+
+    ['acctOld', 'acctNew1', 'acctNew2'].forEach(function (id) {
+        var el = $(id);
+        if (el) { el.value = ''; el.type = 'password'; }
+    });
+    document.querySelectorAll('#acctMask .pw-eye').forEach(function (b) {
+        b.classList.remove('on');
+        b.innerHTML = EYE_ICON;
+        b.title = '显示密码';
+    });
+    $('acctErr').hidden = true;
+    $('acctMask').hidden = false;
+    setTimeout(function () { $('acctOld').focus(); }, 30);
+}
+
+function closeAccountDialog() {
+    $('acctMask').hidden = true;
+}
+
+function saveAccountPassword() {
+    var old = $('acctOld').value;
+    var p1 = $('acctNew1').value;
+    var p2 = $('acctNew2').value;
+    function bad(msg) { var e = $('acctErr'); e.textContent = msg; e.hidden = false; }
+    if (!old) { bad('请输入原密码'); $('acctOld').focus(); return; }
+    if (p1.length < 8) { bad('新密码至少 8 位'); $('acctNew1').focus(); return; }
+    if (p1 !== p2) { bad('两次输入的新密码不一样'); $('acctNew2').focus(); return; }
+    if (p1 === old) { bad('新密码不能和原密码一样'); $('acctNew1').focus(); return; }
+    $('acctErr').hidden = true;
+    postJSON('/api/password', { old: old, new: p1 }).then(function (r) {
+        if (!r.ok) { bad(r.error || '修改失败'); return; }
+        toast('密码已修改', 'ok');
+        closeAccountDialog();
     });
 }
+
+function bindAccountDialog() {
+    $('acctSave').addEventListener('click', saveAccountPassword);
+    $('acctCancel').addEventListener('click', closeAccountDialog);
+    $('acctClose').addEventListener('click', closeAccountDialog);
+    $('acctMask').addEventListener('mousedown', function (ev) {
+        if (ev.target === $('acctMask')) closeAccountDialog();
+    });
+    document.querySelectorAll('#acctMask .pw-eye').forEach(function (btn) {
+        btn.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            var el = document.getElementById(btn.dataset.pw);
+            if (!el) return;
+            var show = el.type === 'password';
+            el.type = show ? 'text' : 'password';
+            btn.innerHTML = show ? EYE_OFF_ICON : EYE_ICON;
+            btn.classList.toggle('on', show);
+            btn.title = show ? '隐藏密码' : '显示密码';
+            el.focus();
+        });
+    });
+    ['acctOld', 'acctNew1', 'acctNew2'].forEach(function (id) {
+        $(id).addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter') { ev.preventDefault(); saveAccountPassword(); }
+        });
+    });
+    document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape' && !$('acctMask').hidden) closeAccountDialog();
+    });
+}
+
+bindAccountDialog();
 
 function bindUserMenu() {
     var btn = $('btnUser');
@@ -1953,11 +2034,88 @@ function applyRole() {
         el.style.display = admin ? '' : 'none';
     });
     if (!admin) {
-        ['btnFolderArchive', 'btnFolderData'].forEach(function (id) {
+        ['sbArchive', 'sbData'].forEach(function (id) {
             var el = $(id);
-            if (el) el.style.display = 'none';
+            if (el) el.hidden = true;
         });
     }
+    syncSysGroup();
+}
+
+/* ---------------- 换肤 ---------------- */
+var SKIN_KEY = 'invoice-skin';
+
+function applySkin(name, save) {
+    if (['b', 'a', 'c'].indexOf(name) < 0) name = 'b';
+    // b 就是默认色板（写在 :root 里），去掉属性即可
+    if (name === 'b') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', name);
+    document.querySelectorAll('#skinPick button').forEach(function (b) {
+        b.classList.toggle('on', b.dataset.skin === name);
+    });
+    if (save) { try { localStorage.setItem(SKIN_KEY, name); } catch (e) {} }
+    // 换肤后图表要重画（颜色写死在配置里，靠重新初始化取新值）
+    if (state.view === 'stats' && !$('statsView').hidden) {
+        Object.keys(charts).forEach(function (k) {
+            if (charts[k]) { try { charts[k].dispose(); } catch (e) {} }
+            delete charts[k];
+        });
+        drawStats();
+    }
+}
+
+function initSkin() {
+    var saved = 'b';
+    try { saved = localStorage.getItem(SKIN_KEY) || 'b'; } catch (e) {}
+    applySkin(saved, false);
+    var pick = $('skinPick');
+    if (pick) {
+        pick.addEventListener('click', function (ev) {
+            var btn = ev.target.closest('button[data-skin]');
+            if (!btn) return;
+            ev.stopPropagation();
+            applySkin(btn.dataset.skin, true);
+        });
+    }
+}
+
+function bindSidebar() {
+    var nav = $('sbNav');
+    if (!nav) return;
+    nav.addEventListener('click', function (ev) {
+        var item = ev.target.closest('.sb-item');
+        if (!item) return;
+        if (item.id === 'sbArchive') { openFolder('archive'); return; }
+        if (item.id === 'sbData') { openFolder('data'); return; }
+        var view = item.dataset.view;
+        if (view) showView(view);
+    });
+}
+
+/* 侧栏「待审核」角标 */
+/* 两个目录入口都不可用时（服务器无图形界面），把「系统」分组标题也收起来 */
+function syncSysGroup() {
+    var g = $('sbSysGrp');
+    if (!g) return;
+    var a = $('sbArchive'), d = $('sbData');
+    var any = (a && !a.hidden) || (d && !d.hidden);
+    g.hidden = !any;
+}
+
+function applyLocalFolders() {
+    var on = !!state.canOpenLocal && isAdmin();
+    ['sbArchive', 'sbData'].forEach(function (id) {
+        var el = $(id);
+        if (el) el.hidden = !on;
+    });
+    syncSysGroup();
+}
+
+function renderPendingBadge(n) {
+    var b = $('sbPending');
+    if (!b) return;
+    if (n > 0) { b.textContent = n > 99 ? '99+' : String(n); b.hidden = false; }
+    else b.hidden = true;
 }
 
 function boot() {
@@ -1968,6 +2126,14 @@ function boot() {
         renderUserChip();
         applyRole();
         renderBell(r.unread || 0);
+        renderPendingBadge(r.pending_reviews || 0);
+        applyLocalFolders();
+        var foot = $('sbFoot');
+        if (foot) foot.textContent = '构建 ' + (state.build || '—');
+        initSkin();
+        // 按地址栏 hash 决定进哪个视图
+        var h = (location.hash || '').replace('#', '');
+        showView(VIEW_META[h] ? h : 'entry', { silentHash: true });
         loadList();
         if (r.user.must_change_pw) {
             toast('这是初始密码，请尽快修改', 'err');
@@ -2169,24 +2335,81 @@ function hideAllViews() {
     });
 }
 
-function showUsers() {
-    if (!isAdmin()) return;
-    hideAllViews();
-    $('usersView').hidden = false;
-    location.hash = '#users';
-    loadUsers();
-    loadLogs();
+/* ---------------- 视图切换（左侧导航） ---------------- */
+var VIEW_META = {
+    entry:  { grp: '业务', name: '新建报销单' },
+    ledger: { grp: '业务', name: '登记台账' },
+    pending:{ grp: '业务', name: '待审核' },
+    stats:  { grp: '管理', name: '数据总览' },
+    users:  { grp: '管理', name: '用户管理' },
+    logs:   { grp: '管理', name: '操作日志' }
+};
+var ADMIN_VIEWS = { pending: 1, stats: 1, users: 1, logs: 1 };
+
+function setCrumb(view) {
+    var m = VIEW_META[view] || VIEW_META.entry;
+    var c = $('crumb');
+    if (c) c.innerHTML = esc(m.grp) + ' · <b>' + esc(m.name) + '</b>';
 }
 
-function showLedger() {
-    hideAllViews();
-    $('entryCard').hidden = false;
-    $('ledgerCard').hidden = false;
-    location.hash = '';
-    Object.keys(charts).forEach(function (k) {
-        if (charts[k]) charts[k].resize();
+function setSideActive(view) {
+    document.querySelectorAll('.sb-item[data-view]').forEach(function (el) {
+        el.classList.toggle('on', el.dataset.view === view);
     });
 }
+
+function showView(view, opts) {
+    opts = opts || {};
+    if (!VIEW_META[view]) view = 'entry';
+    if (ADMIN_VIEWS[view] && !isAdmin()) view = 'entry';
+
+    hideAllViews();
+
+    if (view === 'entry') {
+        $('entryCard').hidden = false;
+    } else if (view === 'ledger' || view === 'pending') {
+        $('ledgerCard').hidden = false;
+        // 待审核 = 台账加「待审核」筛选；普通台账清掉这个筛选
+        var fr = $('freview');
+        if (fr) fr.value = (view === 'pending') ? 'submitted' : '';
+        var lt = $('ledgerTitle');
+        if (lt) lt.textContent = (view === 'pending') ? '待审核' : '登记台账';
+        var em = $('empty');
+        if (em) {
+            em.textContent = (view === 'pending')
+                ? '没有待审核的单据。'
+                : '还没有登记记录。拖入第一张发票试试。';
+        }
+        state.page = 1;
+        loadList();
+    } else if (view === 'stats') {
+        $('statsView').hidden = false;
+        drawStats();
+    } else if (view === 'users' || view === 'logs') {
+        $('usersView').hidden = false;
+        loadUsers();
+        loadLogs();
+        if (view === 'logs') {
+            var lc = document.querySelector('.log-card');
+            if (lc) setTimeout(function () { lc.scrollIntoView({ block: 'start' }); }, 350);
+        }
+    }
+
+    state.view = view;
+    setSideActive(view);
+    setCrumb(view);
+    if (!opts.silentHash) location.hash = (view === 'entry' ? '' : '#' + view);
+    var content = $('content');
+    if (content && !opts.keepScroll) content.scrollTop = 0;
+}
+
+function loadStats() { showView('stats'); }
+function drawStats() { /* 兼容旧调用，实际由 showStats 处理 */ }
+
+function showUsers() { showView('users'); }
+function showStats() { showView('stats'); }
+function showLedger() { showView('ledger'); }
+function hideStats() { showView('ledger'); }
 
 function umMsg(text, kind, password) {
     var box = $('umMsg');
@@ -2372,8 +2595,8 @@ $('logQ').addEventListener('input', function () {
     renderLogs();
 });
 
-$('btnUsers').addEventListener('click', showUsers);
-$('umBack').addEventListener('click', showLedger);
+bindSidebar();
+$('umBack').addEventListener('click', function () { showView('ledger'); });
 
 $('umAdd').addEventListener('click', function () {
     openDialog({
@@ -2522,11 +2745,8 @@ function chartBox(id, ok) {
     return charts[id];
 }
 
-function showStats() {
-    if (!isAdmin()) return;
-    hideAllViews();
-    $('statsView').hidden = false;
-    location.hash = '#stats';
+/* 拉统计数据并渲染卡片 + 图表（视图已由 showView 切好） */
+function drawStats() {
     api('/api/stats/overview').then(function (r) {
         if (!r.ok) { toast(r.error || '统计读取失败', 'err'); return; }
         var o = r.overview || {};
@@ -2549,14 +2769,14 @@ function hideStats() {
 }
 
 /* 从总览页点浏览器后退，回到台账 */
+/* 浏览器前进/后退时按 hash 切视图 */
 window.addEventListener('hashchange', function () {
-    var h = location.hash;
-    if (h === '#stats' && $('statsView').hidden) { showStats(); return; }
-    if (h === '#users' && $('usersView').hidden) { showUsers(); return; }
-    if (h !== '#stats' && h !== '#users' &&
-        (!$('statsView').hidden || !$('usersView').hidden)) {
-        showLedger();
+    var h = (location.hash || '').replace('#', '');
+    if (!h) {
+        if (state.view !== 'entry') showView('entry', { silentHash: true });
+        return;
     }
+    if (VIEW_META[h] && state.view !== h) showView(h, { silentHash: true });
 });
 
 function drawCharts(r) {
@@ -2596,13 +2816,13 @@ function drawCharts(r) {
             ],
             series: [
                 { name: '张数（张）', type: 'bar', barMaxWidth: 26,
-                  itemStyle: { color: '#93C5FD', borderRadius: [4, 4, 0, 0] },
+                  itemStyle: { color: '#7FA8D4', borderRadius: [2, 2, 0, 0] },
                   data: trend.map(function (t) { return t.count; }) },
                 { name: '金额（元）', type: 'line', yAxisIndex: 1, smooth: false,
                   symbol: 'circle', symbolSize: 6, clip: true,
-                  itemStyle: { color: '#2563EB' },
-                  lineStyle: { width: 2, color: '#2563EB' },
-                  areaStyle: { color: 'rgba(37,99,235,.06)' },
+                  itemStyle: { color: '#1B4F8C' },
+                  lineStyle: { width: 2, color: '#1B4F8C' },
+                  areaStyle: { color: 'rgba(27,79,140,.07)' },
                   data: trend.map(function (t) { return t.amount; }) }
             ]
         }, true);
@@ -2619,16 +2839,16 @@ function drawCharts(r) {
                 avoidLabelOverlap: true,
                 label: { show: false },
                 data: [
-                    { name: '待审核', value: rv.pending || 0, itemStyle: { color: '#F59E0B' } },
-                    { name: '已退回', value: rv.returned || 0, itemStyle: { color: '#EF4444' } },
-                    { name: '已通过', value: rv.approved || 0, itemStyle: { color: '#10B981' } }
+                    { name: '待审核', value: rv.pending || 0, itemStyle: { color: '#ED6C02' } },
+                    { name: '已退回', value: rv.returned || 0, itemStyle: { color: '#C62828' } },
+                    { name: '已通过', value: rv.approved || 0, itemStyle: { color: '#2E7D32' } }
                 ]
             }]
         }, true);
     }
 
     var AUDIT_NAME = ['未查验', '查验通过', '查验不通过', '无需查验'];
-    var AUDIT_COLOR = ['#CBD5E1', '#10B981', '#EF4444', '#94A3B8'];
+    var AUDIT_COLOR = ['#C7CDD6', '#2E7D32', '#C62828', '#9CA3AF'];
     var byAudit = r.by_audit || [];
     var c3 = chartBox('chartAudit', byAudit.length);
     if (c3) {
@@ -2648,7 +2868,7 @@ function drawCharts(r) {
 
     ['chartPerson', 'chartSeller'].forEach(function (id, i) {
         var rows = (i === 0 ? r.by_person : r.by_seller) || [];
-        renderRank(id, rows, i === 0 ? '#60A5FA' : '#34D399');
+        renderRank(id, rows, i === 0 ? '#1B4F8C' : '#2E7D32');
     });
 }
 
@@ -2676,8 +2896,7 @@ function renderRank(id, rows, color) {
     }).join('');
 }
 
-$('btnStats').addEventListener('click', showStats);
-$('svBack').addEventListener('click', hideStats);
+$('svBack').addEventListener('click', function () { showView('ledger'); });
 window.addEventListener('resize', function () {
     Object.keys(charts).forEach(function (k) {
         if (charts[k]) charts[k].resize();
@@ -2832,13 +3051,10 @@ api('/api/audit/status').then(function (r) {
     }
 });
 
-/* "打开文件夹"只有本机（Windows 桌面）才有意义。
-   按钮在 HTML 里默认 hidden，能打开才显示，避免刷新时闪一下又消失。 */
+/* 「发票存档 / 数据目录」只有本机桌面才用得上。
+   是否显示取决于 ①服务端 can_open_local ②当前是不是管理员，
+   两个都是异步拿到的，所以统一在 applyLocalFolders 里判断，避免竞态。 */
 api('/api/ping').then(function (r) {
-    if (r && r.ok && r.can_open_local && isAdmin()) {
-        ['btnFolderArchive', 'btnFolderData'].forEach(function (id) {
-            var el = $(id);
-            if (el) el.hidden = false;
-        });
-    }
+    state.canOpenLocal = !!(r && r.ok && r.can_open_local);
+    applyLocalFolders();
 });

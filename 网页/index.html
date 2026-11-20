@@ -3,47 +3,85 @@
 <head>
 <meta charset="utf-8">
 <title>人数发票登记台账</title>
-<link rel="stylesheet" href="/static/style.css">
+<script>
+/* 首屏渲染前先套用上次选的配色，避免闪一下默认色 */
+(function () {
+    try {
+        var t = localStorage.getItem('invoice-skin');
+        if (t === 'a' || t === 'b' || t === 'c') {
+            document.documentElement.setAttribute('data-theme', t);
+        }
+    } catch (e) {}
+})();
+</script><link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-<div class="topbar">
-    <div class="brand"><span class="logo">票</span>人数发票登记台账</div>
-    <div class="stats" id="stats"></div>
-    <div class="actions">
-        <button type="button" id="btnFolderArchive" hidden onclick="openFolder('archive')">📁 发票存档</button>
-        <button type="button" id="btnFolderData" hidden onclick="openFolder('data')">🗄 数据目录</button>
-        <button type="button" data-admin-only id="btnStats">📊 数据总览</button>
-        <button type="button" data-admin-only id="btnUsers">👥 用户管理</button>
-        <button type="button" onclick="exportExcel()">⬇ 导出 Excel</button>
-        <button type="button" class="bell" id="btnBell" title="消息通知">
-            <span class="bell-icon">🔔</span><span class="bell-badge" id="bellBadge" hidden>0</span>
-        </button>
-        <div class="usermenu" id="userChip">
-            <button type="button" class="userbtn" id="btnUser" title="账号">
-                <span class="avatar" id="userAvatar">?</span>
-                <span class="uname" id="userName">—</span>
-                <svg class="chev" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-                    <path d="M2.5 4.5 L6 8 L9.5 4.5" fill="none" stroke="currentColor"
-                          stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </button>
-            <div class="userdrop" id="userDrop" hidden>
-                <div class="ud-head" id="udHead"></div>
-                <button type="button" class="ud-item" id="udSettings">
-                    <span class="ud-ico">⚙</span>账号设置
-                </button>
-                <button type="button" class="ud-item" id="udLogout">
-                    <span class="ud-ico">⏻</span>退出登录
-                </button>
+<div class="app">
+    <!-- ================= 左侧导航 ================= -->
+    <aside class="sidebar">
+        <div class="sb-logo"><span class="logo">票</span><b>发票台账</b></div>
+        <nav class="sb-nav" id="sbNav">
+            <div class="grp">业务</div>
+            <div class="sb-item on" data-view="entry"><span class="ic">📝</span><span>新建报销单</span></div>
+            <div class="sb-item" data-view="ledger"><span class="ic">📋</span><span>登记台账</span></div>
+            <div class="sb-item" data-view="pending" data-admin-only>
+                <span class="ic">⏳</span><span>待审核</span>
+                <span class="badge" id="sbPending" hidden>0</span>
+            </div>
+            <div class="grp" data-admin-only>管理</div>
+            <div class="sb-item" data-view="stats" data-admin-only><span class="ic">📊</span><span>数据总览</span></div>
+            <div class="sb-item" data-view="users" data-admin-only><span class="ic">👥</span><span>用户管理</span></div>
+            <div class="sb-item" data-view="logs" data-admin-only><span class="ic">📜</span><span>操作日志</span></div>
+            <div class="grp" id="sbSysGrp">系统</div>
+            <div class="sb-item" id="sbArchive" hidden><span class="ic">📂</span><span>发票存档</span></div>
+            <div class="sb-item" id="sbData" hidden><span class="ic">🗄</span><span>数据目录</span></div>
+        </nav>
+        <div class="sb-foot">
+            <span class="ver" id="sbFoot">构建 —</span>
+            <div class="skin-pick" id="skinPick" title="切换配色">
+                <button type="button" data-skin="b" style="--dot:#1E2D45" title="政务深蓝"></button>
+                <button type="button" data-skin="a" style="--dot:#1677FF" title="经典企业蓝"></button>
+                <button type="button" data-skin="c" style="--dot:#5B5BD6" title="极简浅灰"></button>
             </div>
         </div>
-    </div>
-</div>
+    </aside>
 
-<main>
+    <!-- ================= 右侧主区 ================= -->
+    <div class="main-area">
+        <header class="topbar">
+            <div class="tb-breadcrumb" id="crumb">业务 · <b>新建报销单</b></div>
+            <div class="tb-stats" id="stats"></div>
+            <div class="tb-actions">
+                <button type="button" class="bell" id="btnBell" title="消息通知">
+                    <span class="bell-icon">🔔</span><span class="bell-badge" id="bellBadge" hidden>0</span>
+                </button>
+                <div class="usermenu" id="userChip">
+                    <button type="button" class="userbtn" id="btnUser" title="账号">
+                        <span class="avatar" id="userAvatar">?</span>
+                        <span class="uname" id="userName">—</span>
+                        <svg class="chev" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                            <path d="M2.5 4.5 L6 8 L9.5 4.5" fill="none" stroke="currentColor"
+                                  stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                    <div class="userdrop" id="userDrop" hidden>
+                        <div class="ud-head" id="udHead"></div>
+                        <button type="button" class="ud-item" id="udSettings">
+                            <span class="ud-ico">⚙</span>账号设置
+                        </button>
+                        <button type="button" class="ud-item" id="udLogout">
+                            <span class="ud-ico">⏻</span>退出登录
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="content" id="content">
+
     <!-- ================= 新建报销单 ================= -->
-    <section class="card" id="entryCard">
+    <section class="panel" id="entryCard">
         <h2>新建报销单</h2>
 
         <div class="entry-top">
@@ -109,8 +147,8 @@
     <div class="alert" id="alert"></div>
 
     <!-- ================= 登记台账 ================= -->
-    <section class="card" id="ledgerCard">
-        <h2>登记台账 <span class="au-stat" id="auditStat"></span></h2>
+    <section class="panel" id="ledgerCard">
+        <h2><span id="ledgerTitle">登记台账</span> <span class="au-stat" id="auditStat"></span></h2>
         <div class="filters">
             <input type="search" id="q" placeholder="搜索 发票号码 / 单号 / 销售方 / 报销人 / 收款人">
             <select id="fperson"><option value="">全部报销人</option></select>
@@ -135,6 +173,7 @@
                 <option value="approved">已通过</option>
             </select>
             <button class="plain" id="refresh">刷新</button>
+            <button type="button" class="plain" id="btnExport" title="把当前台账导出成 Excel">⬇ 导出</button>
             <span class="count" id="count"></span>
         </div>
 
@@ -269,7 +308,9 @@
             </div>
         </div>
     </section>
-</main>
+        </main>
+    </div>
+</div>
 
 <!-- 发票详情 / 报销单详情共用右侧抽屉 -->
 <div class="drawer-mask" id="drawerMask"></div>
@@ -309,6 +350,58 @@
     <div class="ap-log" id="apLog"></div>
     <div class="ap-ft">
         <button type="button" id="apStop">停止查验</button>
+    </div>
+</div>
+
+<!-- 账号设置弹窗 -->
+<div class="dlg-mask" id="acctMask" hidden>
+    <div class="dlg acct-dlg" role="dialog" aria-modal="true">
+        <div class="dlg-acct-hd">
+            <h3>账号设置</h3>
+            <button type="button" class="drawer-x" id="acctClose" title="关闭（Esc）">×</button>
+        </div>
+        <div class="acct-bd">
+            <div class="acct-card">
+                <div class="avatar acct-avatar" id="acctAvatar">?</div>
+                <div class="acct-card-main">
+                    <div class="acct-name" id="acctName">—</div>
+                    <div class="acct-meta" id="acctMeta">—</div>
+                </div>
+            </div>
+
+            <div class="acct-sec">账号信息</div>
+            <div class="acct-grid" id="acctInfo"></div>
+
+            <div class="acct-sec">修改密码</div>
+            <div class="acct-pw">
+                <label class="acct-f">
+                    <span><i class="req">*</i>原密码</span>
+                    <span class="pw-wrap">
+                        <input id="acctOld" type="password" autocomplete="current-password">
+                        <button type="button" class="pw-eye" data-pw="acctOld" title="显示密码"></button>
+                    </span>
+                </label>
+                <label class="acct-f">
+                    <span><i class="req">*</i>新密码 <em>至少 8 位</em></span>
+                    <span class="pw-wrap">
+                        <input id="acctNew1" type="password" autocomplete="new-password">
+                        <button type="button" class="pw-eye" data-pw="acctNew1" title="显示密码"></button>
+                    </span>
+                </label>
+                <label class="acct-f">
+                    <span><i class="req">*</i>确认新密码</span>
+                    <span class="pw-wrap">
+                        <input id="acctNew2" type="password" autocomplete="new-password">
+                        <button type="button" class="pw-eye" data-pw="acctNew2" title="显示密码"></button>
+                    </span>
+                </label>
+                <div class="acct-err" id="acctErr" hidden></div>
+            </div>
+        </div>
+        <div class="dlg-foot">
+            <button type="button" class="plain" id="acctCancel">取消</button>
+            <button type="button" class="solid" id="acctSave">保存</button>
+        </div>
     </div>
 </div>
 

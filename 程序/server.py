@@ -75,6 +75,83 @@ APP_TAG = "invoice-book"
 BUILD = "20261118"       # 构建号，显示在右上角账号菜单里
 
 
+# ----------------------------------------------------------------------
+# 文件句柄（Linux）：跑久了句柄会被浏览器进程、连接等吃掉，
+# 满了以后每个请求都会报 "Too many open files"，网页直接打不开。
+# 这里只做观测和告警，真正的根治是 systemd 里把 LimitNOFILE 调大。
+# ----------------------------------------------------------------------
+def _fd_limit():
+    try:
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        return soft, hard
+    except Exception:
+        return None, None
+
+
+def _open_fd_count():
+    """返回 (已用, 上限, 是否告急)；非 Linux 返回 None。"""
+    try:
+        used = len(os.listdir("/proc/self/fd"))
+    except OSError:
+        return None
+    soft, _hard = _fd_limit()
+    limit = soft if isinstance(soft, int) and soft > 0 else 0
+    warn = bool(limit) and used > limit * 0.8
+    return used, (limit or "?"), warn
+
+
+def _cleanup_stray_browsers():
+    """
+    上个进程如果被 kill -9 或者异常退出，可能留下 chromium 子进程，
+    每个都占几百个句柄。启动时扫一遍 /proc，把属于 Playwright 的残留清掉。
+    """
+    try:
+        import signal
+        me = os.getpid()
+        for name in os.listdir("/proc"):
+            if not name.isdigit():
+                continue
+            pid = int(name)
+            if pid == me:
+                continue
+            try:
+                with open("/proc/%d/cmdline" % pid, "rb") as f:
+                    cmd = f.read().decode("utf-8", "ignore")
+            except OSError:
+                continue
+            if "ms-playwright" not in cmd:
+                continue
+            if not any(k in cmd for k in ("chrome", "chromium", "headless_shell")):
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+                print("[启动清理] 关掉上次残留的浏览器进程 pid=%d" % pid, flush=True)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
+def _file_error_hint(name, exc, folder):
+    """把读文件失败的 errno 翻译成人话，别一律让人 chown。"""
+    no = getattr(exc, "errno", None)
+    text = getattr(exc, "strerror", None) or str(exc)
+    if no in (24, 23):      # EMFILE / ENFILE：句柄耗尽
+        fd = _open_fd_count()
+        extra = ""
+        if fd:
+            extra = "（当前已用 %d / 上限 %s）" % (fd[0], fd[1])
+        return ("服务器打开的文件太多，句柄用完了%s，所以连网页都读不出来。"
+                "应急处置：重启服务 sudo systemctl restart invoice-ledger；"
+                "根治：systemd 单元里加 LimitNOFILE=65536 后 daemon-reload 再重启"
+                % extra)
+    if no in (13, 1):       # EACCES / EPERM：权限
+        return ("读不到 %s（%s）。文件权限不对，请执行："
+                "sudo chown -R invoice:invoice %s" % (name, text, folder))
+    return "读不到 %s（%s）" % (name, text)
+
+
 def _audited_recently(stamp, days=30):
     """查验时间在 days 天以内 → 认为不用重复查（平台配额有限）。"""
     if not stamp:
@@ -307,6 +384,9 @@ class Handler(BaseHTTPRequestHandler):
             "id": u["id"], "username": u["username"],
             "display_name": u.get("display_name") or u["username"],
             "role": u["role"], "must_change_pw": int(u.get("must_change_pw") or 0),
+            "status": int(u.get("status") or 0),
+            "created_at": u.get("created_at"),
+            "last_login_at": u.get("last_login_at"),
         }
 
     # ------------------------------------------------------------------
@@ -320,7 +400,15 @@ class Handler(BaseHTTPRequestHandler):
             qs, path = self._query()
             if path == "/_health":
                 # 给 systemd / docker / 负载均衡做健康检查用，不需要登录
-                return self._send(200, b"ok", "text/plain; charset=utf-8")
+                # 顺带报一下打开的文件句柄数：快用完时就是 "Too many open files" 的前兆
+                info = "ok"
+                fd = _open_fd_count()
+                if fd:
+                    info = "ok fd=%d/%s" % (fd[0], fd[1])
+                    if fd[2]:
+                        info += " WARN 句柄快用完了，尽快重启服务"
+                return self._send(200, info.encode("utf-8"),
+                                  "text/plain; charset=utf-8")
             if path == "/favicon.ico":
                 # 不给的话浏览器每次都会打一条 404 到控制台
                 return self._send(204, b"", "image/x-icon")
@@ -375,9 +463,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/audit/shot":
                 return self._api_audit_shot(qs, user)
             return self._err("未知地址", 404)
-        except Exception:
+        except Exception as exc:
             traceback.print_exc()
-            return self._err("服务端错误", 500)
+            return self._err("服务端错误（%s）" % type(exc).__name__, 500)
 
     def _serve_index(self):
         """
@@ -388,8 +476,15 @@ class Handler(BaseHTTPRequestHandler):
         path = os.path.join(WEB_DIR, "index.html")
         if not os.path.isfile(path):
             return self._err("找不到网页文件 index.html", 404)
-        with open(path, "rb") as f:
-            html = f.read().decode("utf-8")
+        try:
+            with open(path, "rb") as f:
+                html = f.read().decode("utf-8")
+        except OSError as exc:
+            traceback.print_exc()
+            return self._err(_file_error_hint("index.html", exc, WEB_DIR), 500)
+        except UnicodeDecodeError as exc:
+            traceback.print_exc()
+            return self._err("index.html 编码不对（%s），请用 UTF-8 保存后重传" % exc, 500)
         for name in ("style.css", "app.js", "echarts.min.js"):
             target = os.path.join(WEB_DIR, name)
             try:
@@ -401,12 +496,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_file(self, path):
         if not os.path.isfile(path):
-            return self._err("文件不存在", 404)
+            return self._err("文件不存在：%s" % os.path.basename(path), 404)
         ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
         if path.endswith((".html", ".js", ".css")):
             ctype += "; charset=utf-8"
-        with open(path, "rb") as f:
-            data = f.read()
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError as exc:
+            traceback.print_exc()
+            return self._err(_file_error_hint(os.path.basename(path), exc,
+                                              os.path.dirname(path)), 500)
         return self._send(200, data, ctype)
 
     def _api_list(self, qs, user):
@@ -620,9 +720,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/audit/stop":
                 return self._api_audit_stop(user)
             return self._err("未知地址", 404)
-        except Exception:
+        except Exception as exc:
             traceback.print_exc()
-            return self._err("服务端错误", 500)
+            return self._err("服务端错误（%s）" % type(exc).__name__, 500)
 
     def _api_parse(self, user):
         """接收原始文件字节，落临时目录并自动识别。"""
@@ -1446,7 +1546,14 @@ def main():
     print("  发票存档： %s" % STORE.archive_dir)
     print("-" * 58)
     print("  运行平台： %s    可在本机打开文件： %s" % (sys.platform, can_open_local()))
+    fd = _open_fd_count()
+    if fd:
+        print("  文件句柄： 已用 %d / 上限 %s%s"
+              % (fd[0], fd[1], "  ⚠ 快用完了，建议把 LimitNOFILE 调大" if fd[2] else ""))
     print("=" * 58)
+
+    # 上次异常退出可能留下浏览器进程，每个占几百个句柄，先清掉
+    _cleanup_stray_browsers()
 
     # 启动时自检：PDF 解析组件在不在
     try:
