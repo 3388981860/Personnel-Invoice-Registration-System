@@ -61,6 +61,21 @@ def _find_lib_dir(base):
 APP_DIR = _find_dir(BASE, "server.py", "程序")
 LIB_DIR = _find_lib_dir(BASE)
 WEB_DIR = _find_dir(BASE, "index.html", "网页", max_depth=3)
+
+# 新版前端（Vue + Element Plus）的构建产物。
+# 存在就用它当主界面，不存在就自动退回旧版 网页/，部署不会因为忘了打包而白屏。
+DIST_DIR = os.path.join(BASE, "前端", "dist")
+HAS_SPA = os.path.isfile(os.path.join(DIST_DIR, "index.html"))
+
+
+def dist_file(rel):
+    """把 URL 相对路径安全地映射到 dist 目录下；越界返回 None。"""
+    rel = str(rel or "").replace("\\", "/").lstrip("/")
+    root = os.path.normpath(DIST_DIR)
+    full = os.path.normpath(os.path.join(root, rel))
+    if full != root and not full.startswith(root + os.sep):
+        return None
+    return full
 sys.path.insert(0, LIB_DIR)
 sys.path.insert(0, APP_DIR)
 
@@ -210,7 +225,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        if "Cache-Control" not in (extra or {}):
+            self.send_header("Cache-Control", "no-store")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -412,7 +428,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/favicon.ico":
                 # 不给的话浏览器每次都会打一条 404 到控制台
                 return self._send(204, b"", "image/x-icon")
-            if path in ("/login", "/login.html"):
+            if path in ("/login", "/login.html") and not HAS_SPA:
+                # 旧版登录页；装了新版前端后 /login 是前端路由，交给下面的 SPA 处理
                 return self._serve_file(os.path.join(WEB_DIR, "login.html"))
             if path == "/api/ping":
                 return self._json({
@@ -425,6 +442,19 @@ class Handler(BaseHTTPRequestHandler):
                 })
             if path.startswith("/static/"):
                 return self._serve_file(os.path.join(WEB_DIR, os.path.basename(path)))
+
+            # ---------- 新版前端（Vue）静态托管 ----------
+            # 装了新版就优先用新版；没有 dist 自动退回旧版网页，部署不会白屏。
+            if HAS_SPA:
+                if path == "/old" or path.startswith("/old/"):
+                    # 留一个旧版入口，出问题可以立刻切回去
+                    return self._serve_index()
+                if path.startswith("/assets/") or path.endswith(
+                        (".js", ".css", ".png", ".jpg", ".svg", ".ico", ".woff", ".woff2")):
+                    return self._serve_dist(path)
+                if not path.startswith("/api/") and "." not in os.path.basename(path):
+                    # 前端路由（/entry、/ledger、/login…）统一交给单页应用
+                    return self._serve_spa()
 
             user = self._current_user()
             if not user:
@@ -466,6 +496,38 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             traceback.print_exc()
             return self._err("服务端错误（%s）" % type(exc).__name__, 500)
+
+    def _serve_spa(self):
+        """新版前端是单页应用：所有前端路由都返回同一个 index.html。"""
+        path = os.path.join(DIST_DIR, "index.html")
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError as exc:
+            traceback.print_exc()
+            return self._err(_file_error_hint("前端/dist/index.html", exc, DIST_DIR), 500)
+        # 入口文件不能缓存，否则升级后浏览器还跑旧代码
+        return self._send(200, data, "text/html; charset=utf-8",
+                          {"Cache-Control": "no-store"})
+
+    def _serve_dist(self, rel):
+        """dist 里的静态资源（js/css/图片）。文件名带 hash，可以长缓存。"""
+        full = dist_file(rel)
+        if not full or not os.path.isfile(full):
+            return self._err("文件不存在", 404)
+        ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+        if full.endswith((".js", ".css", ".html", ".svg", ".json")):
+            ctype += "; charset=utf-8"
+        try:
+            with open(full, "rb") as f:
+                data = f.read()
+        except OSError as exc:
+            traceback.print_exc()
+            return self._err(_file_error_hint(os.path.basename(full), exc,
+                                              os.path.dirname(full)), 500)
+        cache = ("public, max-age=31536000, immutable"
+                 if "/assets/" in ("/" + rel) else "no-cache")
+        return self._send(200, data, ctype, {"Cache-Control": cache})
 
     def _serve_index(self):
         """

@@ -1,0 +1,139 @@
+/**
+ * 后端接口封装。
+ * 目前指向既有的 Python 服务；以后换成 Spring Boot 只要接口契约不变即可。
+ */
+
+export class ApiError extends Error {
+  constructor(message, { status = 0, field = '', payload = null } = {}) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.field = field
+    this.payload = payload
+  }
+}
+
+let onUnauthorized = null
+/** 由 router 注册：会话失效时跳登录页 */
+export function setUnauthorizedHandler(fn) { onUnauthorized = fn }
+
+function buildUrl(path, query) {
+  if (!query) return path
+  const qs = new URLSearchParams()
+  Object.entries(query).forEach(([k, v]) => {
+    if (v === undefined || v === null || v === '') return
+    qs.append(k, v)
+  })
+  const s = qs.toString()
+  return s ? `${path}?${s}` : path
+}
+
+async function request(path, { method = 'GET', body, query, raw = false, headers = {} } = {}) {
+  const opts = {
+    method,
+    credentials: 'same-origin',
+    headers: { ...headers }
+  }
+  if (body !== undefined && !raw) {
+    opts.headers['Content-Type'] = 'application/json'
+    opts.body = JSON.stringify(body)
+  } else if (raw) {
+    opts.body = body
+  }
+
+  let resp
+  try {
+    resp = await fetch(buildUrl(path, query), opts)
+  } catch (e) {
+    throw new ApiError('连不上服务器，请检查网络或服务是否在运行', { status: 0 })
+  }
+
+  if (resp.status === 401) {
+    if (onUnauthorized) onUnauthorized()
+    throw new ApiError('登录已过期，请重新登录', { status: 401 })
+  }
+
+  const ctype = resp.headers.get('content-type') || ''
+  if (!ctype.includes('application/json')) {
+    if (!resp.ok) throw new ApiError(`服务返回 ${resp.status}`, { status: resp.status })
+    return resp
+  }
+
+  const data = await resp.json()
+  if (!resp.ok || data.ok === false) {
+    throw new ApiError(data.error || `请求失败（${resp.status}）`, {
+      status: resp.status,
+      field: data.field || '',
+      payload: data
+    })
+  }
+  return data
+}
+
+const get = (p, query) => request(p, { query })
+const post = (p, body) => request(p, { method: 'POST', body })
+
+export const api = {
+  // ---- 会话 ----
+  me: () => get('/api/me'),
+  ping: () => get('/api/ping'),
+  login: (username, password) => post('/api/login', { username, password }),
+  register: (payload) => post('/api/register', payload),
+  logout: () => post('/api/logout', {}),
+  changePassword: (oldPwd, newPwd) => post('/api/password', { old: oldPwd, new: newPwd }),
+
+  // ---- 台账 ----
+  list: (query) => get('/api/list', query),
+  parse: (file) => {
+    // 文件名用 base64 放在头里，后端按扩展名判断 PDF/OFD
+    const name = btoa(unescape(encodeURIComponent(file.name)))
+    return request('/api/parse', {
+      method: 'POST',
+      raw: true,
+      body: file,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-File-Name': name
+      }
+    })
+  },
+  add: (record) => post('/api/add', record),
+  update: (record) => post('/api/update', record),
+  setStatus: (id, status) => post('/api/status', { id, status }),
+  remove: (id) => post('/api/delete', { id }),
+  attach: (ids, batchId) => post('/api/attach', { ids, batch_id: batchId }),
+  detach: (ids) => post('/api/detach', { ids }),
+
+  // ---- 报销单 ----
+  batches: (query) => get('/api/batches', query),
+  batch: (id) => get('/api/batch', { id }),
+  batchAdd: (payload) => post('/api/batch_add', payload),
+  batchUpdate: (payload) => post('/api/batch_update', payload),
+  batchStatus: (id, status) => post('/api/batch_status', { id, status }),
+  batchReview: (payload) => post('/api/batch/review', payload),
+  batchResubmit: (id) => post('/api/batch_resubmit', { id }),
+  batchDelete: (id) => post('/api/batch_delete', { id }),
+
+  // ---- 查验 ----
+  auditStatus: () => get('/api/audit/status'),
+  auditStart: (ids) => post('/api/audit/start', { ids }),
+  auditStop: () => post('/api/audit/stop', {}),
+  auditShotUrl: (id, t) => `/api/audit/shot?id=${id}&t=${encodeURIComponent(t || '')}`,
+
+  // ---- 通知 ----
+  notifications: () => get('/api/notifications'),
+  readNotifications: (ids) => post('/api/notifications/read', { ids }),
+
+  // ---- 统计 ----
+  stats: () => get('/api/stats/overview'),
+
+  // ---- 用户 / 日志 ----
+  users: () => get('/api/users'),
+  userCreate: (payload) => post('/api/users/create', payload),
+  userUpdate: (payload) => post('/api/users/update', payload),
+  userResetPassword: (id) => post('/api/users/reset_password', { id }),
+  logs: (query) => get('/api/logs', query),
+
+  // ---- 导出 ----
+  exportUrl: (query) => buildUrl('/api/export', query)
+}

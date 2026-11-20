@@ -1,0 +1,375 @@
+﻿/* ==========================================================================
+   人数发票登记台账 · 主题
+   三套配色：b 政务深蓝（默认） / a 经典企业蓝 / c 极简浅灰
+   侧栏、登录页、按钮、圆角全部跟着 html[data-theme] 走
+   ========================================================================== */
+
+:root,
+html[data-theme="b"] {
+  --brand-primary: #1B4F8C;
+  --brand-accent: #C8A45C;
+  --brand-layout: #F4F6F9;
+  --brand-text: #1F2937;
+  --brand-text-3: #6B7280;
+
+  /* 侧栏 */
+  --sb-bg: #1E2D45;
+  --sb-bg2: #243352;
+  --sb-text: #A3B1CC;
+  --sb-hover-bg: rgba(255, 255, 255, .05);
+  --sb-hover-fg: #FFFFFF;
+  --sb-on-bg: rgba(27, 79, 140, .38);
+  --sb-on-fg: #FFFFFF;
+  --sb-on-border: #C8A45C;
+  --sb-group: rgba(163, 177, 204, .6);
+  --sb-foot: rgba(163, 177, 204, .5);
+  --sb-border: rgba(255, 255, 255, .06);
+  --sb-logo-bg: #C8A45C;
+  --sb-logo-fg: #1E2D45;
+
+  /* 登录页 */
+  --login-bg: linear-gradient(135deg, #15243C 0%, #1B4F8C 55%, #1A3358 100%);
+  --login-brand-bg: linear-gradient(135deg, #1B4F8C 0%, #234E7C 100%);
+  --login-brand-fg: #FFFFFF;
+  --login-grid: rgba(255, 255, 255, .035);
+  --login-copy: rgba(163, 177, 204, .7);
+
+  /* 其它 */
+  --selbar-bg: #E3F0FB;
+  --selbar-line: #B8D4F0;
+  --head-bg: #F3F4F6;
+  --hover-bg: #F9FAFB;
+
+  /* Element Plus */
+  --el-color-primary: #1B4F8C;
+  --el-color-primary-light-3: #3D7CC4;
+  --el-color-primary-light-5: #6C9DD0;
+  --el-color-primary-light-7: #A7C4E2;
+  --el-color-primary-light-8: #C3D6EC;
+  --el-color-primary-light-9: #E3F0FB;
+  --el-color-primary-dark-2: #14406F;
+  --el-color-success: #2E7D32;
+  --el-color-warning: #ED6C02;
+  --el-color-danger: #C62828;
+  --el-color-error: #C62828;
+  --el-border-radius-base: 4px;
+  --el-border-radius-small: 2px;
+  --el-font-size-base: 14px;
+  --el-text-color-primary: #1F2937;
+  --el-text-color-regular: #4B5563;
+  --el-border-color: #D1D5DB;
+  --el-border-color-light: #E5E7EB;
+  --el-fill-color-light: #F3F4F6;
+}
+
+/* ---------- A · 经典企业蓝（Ant 风，浅色侧栏） ---------- */
+html[data-theme="a"] {
+  --brand-primary: #1677FF;
+  --brand-accent: #1677FF;
+  --brand-layout: #F0F2F5;
+  --brand-text: rgba(0, 0, 0, .88);
+  --brand-text-3: rgba(0, 0, 0, .45);
+
+  --sb-bg: #FFFFFF;
+  --sb-bg2: #FAFAFA;
+  --sb-text: #595959;
+  --sb-hover-bg: #F5F5F5;
+  --sb-hover-fg: #1677FF;
+  --sb-on-bg: #E6F4FF;
+  --sb-on-fg: #1677FF;
+  --sb-on-border: #1677FF;
+  --sb-group: #8C8C8C;
+  --sb-foot: #BFBFBF;
+  --sb-border: #F0F0F0;
+  --sb-logo-bg: #1677FF;
+  --sb-logo-fg: #FFFFFF;
+
+  --login-bg: linear-gradient(135deg, #0958D9 0%, #1677FF 55%, #4096FF 100%);
+  --login-brand-bg: linear-gradient(135deg, #1677FF 0%, #0958D9 100%);
+  --login-brand-fg: #FFFFFF;
+  --login-grid: rgba(255, 255, 255, .06);
+  --login-copy: rgba(255, 255, 255, .8);
+
+  --selbar-bg: #E6F4FF;
+  --selbar-line: #B7DBFF;
+  --head-bg: #F5F5F5;
+  --hover-bg: #FAFAFA;
+
+  --el-color-primary: #1677FF;
+  --el-color-primary-light-3: #4096FF;
+  --el-color-primary-light-5: #69B1FF;
+  --el-color-primary-light-7: #A3CFFF;
+  --el-color-primary-light-8: #C8E2FF;
+  --el-color-primary-light-9: #E6F4FF;
+  --el-color-primary-dark-2: #0958D9;
+  --el-color-success: #52C41A;
+  --el-color-warning: #FAAD14;
+  --el-color-danger: #FF4D4F;
+  --el-color-error: #FF4D4F;
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-text-color-primary: rgba(0, 0, 0, .88);
+  --el-text-color-regular: rgba(0, 0, 0, .65);
+  --el-border-color: #D9D9D9;
+  --el-border-color-light: #F0F0F0;
+  --el-fill-color-light: #F5F5F5;
+}
+
+/* ---------- C · 极简浅灰 ---------- */
+html[data-theme="c"] {
+  --brand-primary: #5B5BD6;
+  --brand-accent: #5B5BD6;
+  --brand-layout: #FAFAFB;
+  --brand-text: #111114;
+  --brand-text-3: #71717A;
+
+  --sb-bg: #FFFFFF;
+  --sb-bg2: #FAFAFB;
+  --sb-text: #71717A;
+  --sb-hover-bg: #F7F8FA;
+  --sb-hover-fg: #111114;
+  --sb-on-bg: #EEF2FF;
+  --sb-on-fg: #5B5BD6;
+  --sb-on-border: #5B5BD6;
+  --sb-group: #A1A1AA;
+  --sb-foot: #C7C7CE;
+  --sb-border: #ECECEF;
+  --sb-logo-bg: #5B5BD6;
+  --sb-logo-fg: #FFFFFF;
+
+  --login-bg: linear-gradient(160deg, #FAFAFB 0%, #F1F1F5 55%, #E9E9F0 100%);
+  --login-brand-bg: #FFFFFF;
+  --login-brand-fg: #111114;
+  --login-grid: rgba(0, 0, 0, .03);
+  --login-copy: #71717A;
+
+  --selbar-bg: #EEF2FF;
+  --selbar-line: #D6DAFB;
+  --head-bg: #F7F8FA;
+  --hover-bg: #FAFAFB;
+
+  --el-color-primary: #5B5BD6;
+  --el-color-primary-light-3: #7373E0;
+  --el-color-primary-light-5: #8E8EE8;
+  --el-color-primary-light-7: #B9B9F0;
+  --el-color-primary-light-8: #D2D2F5;
+  --el-color-primary-light-9: #EEF2FF;
+  --el-color-primary-dark-2: #4A4AC4;
+  --el-color-success: #16A34A;
+  --el-color-warning: #EAB308;
+  --el-color-danger: #E5484D;
+  --el-color-error: #E5484D;
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-text-color-primary: #111114;
+  --el-text-color-regular: #414146;
+  --el-border-color: #E4E4E7;
+  --el-border-color-light: #ECECEF;
+  --el-fill-color-light: #F7F8FA;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app { height: 100%; margin: 0; }
+
+body {
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  color: var(--brand-text);
+  background: var(--brand-layout);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- 应用骨架 ---------- */
+.app-shell { display: flex; height: 100vh; overflow: hidden; }
+
+.sidebar {
+  width: 200px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--sb-bg);
+  color: var(--sb-text);
+  border-right: 1px solid var(--sb-border);
+}
+.sb-logo {
+  height: 56px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+  background: var(--sb-bg2);
+  border-bottom: 1px solid var(--sb-border);
+}
+.sb-logo .logo {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--sb-logo-bg);
+  color: var(--sb-logo-fg);
+  font-weight: 700; font-size: 14px; border-radius: 3px;
+}
+.sb-logo b { color: var(--sb-on-fg); font-size: 14px; font-weight: 600; letter-spacing: .5px; }
+
+.sb-nav { flex: 1; overflow-y: auto; padding: 8px 0; }
+.sb-group {
+  padding: 14px 18px 6px;
+  font-size: 11px; letter-spacing: 1px;
+  color: var(--sb-group);
+}
+.sb-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 18px;
+  font-size: 13px; color: var(--sb-text);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.sb-item:hover { background: var(--sb-hover-bg); color: var(--sb-hover-fg); }
+.sb-item.on {
+  background: var(--sb-on-bg);
+  color: var(--sb-on-fg);
+  border-left-color: var(--sb-on-border);
+}
+.sb-item .badge {
+  margin-left: auto; min-width: 18px; height: 16px; padding: 0 5px;
+  background: var(--el-color-danger); color: #fff;
+  font-size: 11px; line-height: 16px; text-align: center; border-radius: 8px;
+}
+.sb-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px 10px 18px;
+  font-size: 11px; color: var(--sb-foot);
+  border-top: 1px solid var(--sb-border);
+}
+.sb-foot .ver { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 换肤按钮 */
+.skin-pick { display: flex; gap: 5px; flex: none; }
+.skin-pick button {
+  width: 15px; height: 15px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--dot, #888); cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, .35);
+  transition: transform .12s, box-shadow .12s;
+}
+.skin-pick button:hover { transform: scale(1.15); }
+.skin-pick button.on { box-shadow: 0 0 0 2px var(--sb-bg), 0 0 0 3.5px var(--el-color-primary); }
+
+.main-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.topbar {
+  height: 56px; flex: none;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 20px;
+  background: #fff;
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+.crumb { font-size: 13px; color: var(--brand-text-3); white-space: nowrap; }
+.crumb b { color: var(--brand-text); font-weight: 600; }
+
+.top-stats { flex: 1; display: flex; align-items: center; min-width: 0; overflow: hidden; }
+.top-stat {
+  display: flex; align-items: baseline; gap: 5px;
+  padding: 0 14px;
+  border-right: 1px solid var(--el-border-color-light);
+  font-size: 12px; color: var(--brand-text-3); white-space: nowrap;
+}
+.top-stat:last-child { border-right: none; }
+.top-stat b { font-size: 17px; font-weight: 700; color: var(--el-color-danger); font-variant-numeric: tabular-nums; }
+.top-stat .u { font-size: 11px; }
+
+.top-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+
+.content { flex: 1; overflow: auto; padding: 16px 20px 24px; }
+
+/* ---------- 面板 ---------- */
+.panel {
+  background: #fff;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: var(--el-border-radius-base);
+  margin-bottom: 14px;
+}
+.panel-hd {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--el-border-color-light);
+  font-size: 15px; font-weight: 600;
+}
+.panel-hd::before {
+  content: ''; width: 3px; height: 16px; background: var(--el-color-primary); flex: none;
+}
+.panel-hd .sub { font-size: 12px; font-weight: 400; color: var(--brand-text-3); }
+.panel-bd { padding: 16px; }
+
+/* ---------- 表格 ---------- */
+.el-table th.el-table__cell {
+  background: var(--head-bg) !important;
+  color: var(--el-text-color-regular);
+  font-weight: 600;
+}
+.el-table thead th.el-table__cell { border-bottom: 2px solid var(--el-color-primary) !important; }
+.el-table .cell { line-height: 1.6; }
+.mono { font-family: 'Consolas', 'SF Mono', monospace; }
+.money { font-family: 'Consolas', 'SF Mono', monospace; font-variant-numeric: tabular-nums; }
+
+/* ---------- 登录页 ---------- */
+.login-page {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--login-bg);
+  position: relative; overflow: hidden;
+}
+.login-page::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    linear-gradient(var(--login-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--login-grid) 1px, transparent 1px);
+  background-size: 48px 48px, 48px 48px;
+}
+.login-card {
+  position: relative; z-index: 2;
+  width: 100%; max-width: 430px;
+  background: #fff; border-radius: var(--el-border-radius-base); overflow: hidden;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .28);
+}
+.login-brand {
+  display: flex; align-items: center; gap: 14px;
+  padding: 26px 32px;
+  background: var(--login-brand-bg);
+  color: var(--login-brand-fg);
+  border-bottom: 3px solid var(--brand-accent);
+}
+.login-brand .logo {
+  width: 42px; height: 42px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--brand-accent); color: #fff;
+  font-size: 20px; font-weight: 700; border-radius: 4px;
+}
+.login-brand b { display: block; font-size: 17px; letter-spacing: 1px; }
+.login-brand span { display: block; font-size: 11px; opacity: .75; letter-spacing: 2px; margin-top: 2px; }
+.login-body { padding: 32px 32px 26px; }
+.login-body h2 { margin: 0 0 6px; font-size: 22px; letter-spacing: 2px; color: var(--brand-text); }
+.login-tip { margin: 0 0 22px; font-size: 13px; color: var(--brand-text-3); }
+.login-copy {
+  position: relative; z-index: 2;
+  margin-top: 18px; text-align: center;
+  font-size: 11px; letter-spacing: 1px; color: var(--login-copy);
+}
+
+/* 极简浅灰主题下登录卡片顶部是白底，圆标要换色 */
+html[data-theme="c"] .login-brand .logo { background: var(--el-color-primary); }
+html[data-theme="c"] .login-card { box-shadow: 0 18px 50px rgba(0, 0, 0, .12); }
+
+/* ---------- 杂项 ---------- */
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.text-muted { color: var(--brand-text-3); }
+.mb-0 { margin-bottom: 0; }
+.w-full { width: 100%; }
+
+/* 头像统一用主题色 */
+.avatar-brand,
+.avatar-brand .el-avatar__inner {
+  background: var(--el-color-primary) !important;
+  color: #fff;
+}
+.brand-strong { color: var(--el-color-primary); font-size: 16px; font-weight: 700; }
