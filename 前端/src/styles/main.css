@@ -1,4 +1,4 @@
-﻿/* ==========================================================================
+/* ==========================================================================
    人数发票登记台账 · 主题
    三套配色：b 政务深蓝（默认） / a 经典企业蓝 / c 极简浅灰
    侧栏、登录页、按钮、圆角全部跟着 html[data-theme] 走
@@ -203,12 +203,13 @@ body {
   border-bottom: 1px solid var(--sb-border);
 }
 .sb-logo .logo {
-  width: 28px; height: 28px;
+  width: 30px; height: 30px; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
   background: var(--sb-logo-bg);
   color: var(--sb-logo-fg);
-  font-weight: 700; font-size: 14px; border-radius: 3px;
+  border-radius: 5px;
 }
+.sb-logo .logo svg { display: block; }
 .sb-logo b { color: var(--sb-on-fg); font-size: 14px; font-weight: 600; letter-spacing: .5px; }
 
 .sb-nav { flex: 1; overflow-y: auto; padding: 8px 0; }
@@ -278,7 +279,29 @@ body {
 .top-stat b { font-size: 17px; font-weight: 700; color: var(--el-color-danger); font-variant-numeric: tabular-nums; }
 .top-stat .u { font-size: 11px; }
 
-.top-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+.top-actions { display: flex; align-items: center; gap: 10px; flex: none; margin-left: auto; }
+
+/* 顶栏中间的全局信息：最新公告 + 时钟 */
+.top-global {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 18px;
+  padding-left: 8px;
+}
+.g-notice {
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 460px; min-width: 0;
+  padding: 4px 10px; border-radius: 20px;
+  background: #F1F5FB; border: 1px solid #E3EAF4;
+  cursor: pointer; font-size: 12.5px; color: #33507A;
+}
+.g-notice:hover { background: #E7EFFA; border-color: #C9D8EC; }
+.g-notice .el-icon { color: var(--brand-accent); font-size: 13px; }
+.g-label {
+  flex: none; font-size: 11px; color: #fff; background: var(--brand-accent);
+  border-radius: 3px; padding: 1px 5px;
+}
+.g-text { min-width: 0; }
+.g-clock { margin-left: auto; font-size: 12.5px; color: var(--brand-text-3); font-variant-numeric: tabular-nums; }
 
 .content { flex: 1; overflow: auto; padding: 16px 20px 24px; }
 
@@ -315,9 +338,12 @@ body {
 /* ---------- 登录页 ---------- */
 .login-page {
   min-height: 100vh;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
   background: var(--login-bg);
   position: relative; overflow: hidden;
+  padding: 20px;
+  box-sizing: border-box;
 }
 .login-page::before {
   content: ''; position: absolute; inset: 0; pointer-events: none;
@@ -326,38 +352,130 @@ body {
     linear-gradient(90deg, var(--login-grid) 1px, transparent 1px);
   background-size: 48px 48px, 48px 48px;
 }
+
+/* 卡片：左表单 + 右品牌 */
 .login-card {
   position: relative; z-index: 2;
-  width: 100%; max-width: 430px;
-  background: #fff; border-radius: var(--el-border-radius-base); overflow: hidden;
+  display: flex;
+  width: 100%; max-width: 760px;
+  background: #fff;
+  border-radius: 10px; overflow: hidden;
   box-shadow: 0 24px 70px rgba(0, 0, 0, .28);
 }
-.login-brand {
-  display: flex; align-items: center; gap: 14px;
-  padding: 26px 32px;
-  background: var(--login-brand-bg);
-  color: var(--login-brand-fg);
-  border-bottom: 3px solid var(--brand-accent);
+
+/* ---- 左：表单 ---- */
+.login-left {
+  flex: 1 1 auto;
+  display: flex; flex-direction: column;
+  min-width: 0;
 }
-.login-brand .logo {
-  width: 42px; height: 42px; flex: none;
+.login-head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 16px 26px;
+  border-bottom: 1px solid #EEF1F5;
+}
+.login-head .logo {
+  width: 26px; height: 26px; flex: none;
   display: flex; align-items: center; justify-content: center;
-  background: var(--brand-accent); color: #fff;
-  font-size: 20px; font-weight: 700; border-radius: 4px;
+  background: var(--brand-accent); color: #12324F;
+  border-radius: 6px;
 }
-.login-brand b { display: block; font-size: 17px; letter-spacing: 1px; }
-.login-brand span { display: block; font-size: 11px; opacity: .75; letter-spacing: 2px; margin-top: 2px; }
-.login-body { padding: 32px 32px 26px; }
-.login-body h2 { margin: 0 0 6px; font-size: 22px; letter-spacing: 2px; color: var(--brand-text); }
+.login-head .logo svg { display: block; }
+.login-head .head-name {
+  font-size: 14px; font-weight: 600; letter-spacing: .5px;
+  color: var(--brand-text);
+}
+.login-head .head-link { margin-left: auto; font-size: 13px; }
+
+.login-form { padding: 26px 34px 30px; }
+.login-form h2 {
+  margin: 0 0 6px; font-size: 22px; letter-spacing: 1px;
+  color: var(--brand-text); font-weight: 600;
+}
 .login-tip { margin: 0 0 22px; font-size: 13px; color: var(--brand-text-3); }
+
+.login-form .el-form-item { margin-bottom: 18px; }
+.login-form .el-input__wrapper {
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px #E2E6EC inset;
+}
+.login-form .el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.login-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: -4px 0 18px; font-size: 13px;
+}
+.login-row .el-link { font-size: 13px; }
+
+.login-btn {
+  width: 100%; height: 44px; letter-spacing: 4px;
+  border-radius: 6px; font-size: 15px;
+}
+
+/* ---- 左：品牌（浅色，跟右栏连成一张卡） ---- */
+.login-right {
+  flex: 0 0 292px;
+  display: flex; flex-direction: column;
+  background: linear-gradient(180deg, #F7F9FC 0%, #EEF3F9 100%);
+  border-right: 1px solid #E8EDF3;
+}
+.qr-box {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 8px;
+  padding: 28px 22px;
+  text-align: center;
+}
+.qr-box .logo.big {
+  width: 60px; height: 60px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--brand-accent); color: #12324F;
+  border-radius: 14px;
+  box-shadow: 0 8px 20px rgba(27, 79, 140, .18);
+}
+.qr-box .qr-title {
+  font-size: 15.5px; font-weight: 600; letter-spacing: 1px;
+  color: var(--brand-text); margin-top: 6px;
+}
+.qr-box .qr-sub {
+  font-size: 9.5px; letter-spacing: 1.4px;
+  color: #9AA6B6; margin-top: -4px;
+}
+.qr-list {
+  list-style: none; margin: 16px 0 0; padding: 0; width: 100%;
+  text-align: left;
+}
+.qr-list li {
+  font-size: 12.5px; color: #4B5563; padding: 8px 0 8px 16px;
+  position: relative; border-bottom: 1px solid #E7EDF4;
+}
+.qr-list li:last-child { border-bottom: none; }
+.qr-list li::before {
+  content: ''; position: absolute; left: 3px; top: 15px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--brand-accent);
+}
+.qr-foot {
+  margin-top: auto; padding-top: 16px;
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11px; color: #9AA6B6;
+}
+
 .login-copy {
   position: relative; z-index: 2;
   margin-top: 18px; text-align: center;
   font-size: 11px; letter-spacing: 1px; color: var(--login-copy);
 }
 
-/* 极简浅灰主题下登录卡片顶部是白底，圆标要换色 */
-html[data-theme="c"] .login-brand .logo { background: var(--el-color-primary); }
+/* 窄屏：右边收起来 */
+@media (max-width: 820px) {
+  .login-right { display: none; }
+  .login-card { max-width: 420px; }
+  .login-form { padding: 22px 24px 26px; }
+}
+
 html[data-theme="c"] .login-card { box-shadow: 0 18px 50px rgba(0, 0, 0, .12); }
 
 /* ---------- 杂项 ---------- */

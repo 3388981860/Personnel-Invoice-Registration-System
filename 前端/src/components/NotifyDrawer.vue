@@ -71,6 +71,12 @@ async function open(n) {
     state.unread = Math.max(0, state.unread - 1)
     emit('read', state.unread)
   }
+  // 公告没有单据号，跳到「公告」页看全文
+  if (n.kind === 'notice' || n.announcement_id) {
+    emit('update:modelValue', false)
+    router.push({ name: 'notice' })
+    return
+  }
   if (n.batch_id) {
     emit('update:modelValue', false)
     router.push({ name: 'ledger', query: { batch: n.batch_id } })

@@ -3,7 +3,7 @@
     <div class="panel">
       <div class="panel-hd">
         <span>操作日志</span>
-        <span class="sub">共 {{ logs.length }} 条</span>
+        <span class="sub">共 {{ filtered.length }} 条</span>
         <div style="margin-left:auto;display:flex;gap:8px">
           <el-input v-model="keyword" size="small" placeholder="搜索说明 / 操作人" style="width:190px" clearable />
           <el-select v-model="days" size="small" style="width:120px" @change="load">
@@ -15,7 +15,8 @@
         </div>
       </div>
 
-      <el-table v-loading="loading" :data="filtered" size="small" style="width:100%">
+      <el-table v-loading="loading" :data="paged" size="small" style="width:100%"
+                max-height="calc(100vh - 300px)">
         <el-table-column prop="created_at" label="时间" width="170" />
         <el-table-column label="对象" width="100">
           <template #default="{ row }">
@@ -30,12 +31,24 @@
         <el-table-column prop="detail" label="说明" min-width="260" show-overflow-tooltip />
         <el-table-column prop="username" label="操作人" width="120" />
       </el-table>
+
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :page-sizes="[20, 50, 100, 200]"
+          :total="filtered.length"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+          size="small"
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 
@@ -43,6 +56,10 @@ const logs = ref([])
 const loading = ref(false)
 const keyword = ref('')
 const days = ref(30)
+const page = ref(1)
+const pageSize = ref(50)
+
+watch(keyword, () => { page.value = 1 })
 
 const filtered = computed(() => {
   const k = keyword.value.trim()
@@ -51,7 +68,16 @@ const filtered = computed(() => {
     String(l.detail || '').includes(k) || String(l.username || '').includes(k))
 })
 
-const TARGET = { invoice: '发票', batch: '单据', user: '账号', '': '其他' }
+/** 当前页的数据 */
+const paged = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filtered.value.slice(start, start + pageSize.value)
+})
+
+const TARGET = {
+  invoice: '发票', batch: '单据', user: '账号', contract: '合同',
+  project: '项目', audit_log: '日志', '': '其他'
+}
 const ACTION = {
   login: '登录', logout: '退出', create_invoice: '登记发票', update_invoice: '修改发票',
   delete_invoice: '删除发票', submit_batch: '提交单据', review_approve: '审核通过',
@@ -73,6 +99,7 @@ async function load() {
   try {
     const r = await api.logs({ days: days.value, limit: 500 })
     logs.value = r.logs || []
+    page.value = 1
   } catch (e) {
     ElMessage.error(e.message || '读取失败')
   } finally {
@@ -82,3 +109,10 @@ async function load() {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.pager {
+  display: flex; justify-content: flex-end;
+  padding: 12px 16px 4px;
+}
+</style>

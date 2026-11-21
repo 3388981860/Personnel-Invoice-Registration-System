@@ -1,77 +1,123 @@
-﻿<template>
+<template>
   <div class="login-page">
-    <div>
-      <div class="login-card">
-        <div class="login-brand">
-          <span class="logo">票</span>
-          <div>
-            <b>人数发票登记台账</b>
-            <span>INVOICE REGISTRATION SYSTEM</span>
-          </div>
-        </div>
+    <div class="login-card">
+      <!-- 左：品牌信息 -->
+      <div class="login-right">
+        <div class="qr-box">
+          <span class="logo big">
+            <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true">
+              <path d="M12 2.6 21.4 7.4H2.6L12 2.6Z"/>
+              <rect x="4.6" y="9.1" width="2.5" height="8.2" rx=".5"/>
+              <rect x="10.75" y="9.1" width="2.5" height="8.2" rx=".5"/>
+              <rect x="16.9" y="9.1" width="2.5" height="8.2" rx=".5"/>
+              <rect x="2.9" y="18.4" width="18.2" height="2.5" rx=".7"/>
+            </svg>
+          </span>
+          <div class="qr-title">人数行政平台</div>
+          <div class="qr-sub">ADMINISTRATION PLATFORM</div>
 
-        <div class="login-body">
-          <h2>{{ mode === 'login' ? '登录' : '注册' }}</h2>
-          <p class="login-tip">
-            {{ mode === 'login' ? '请使用您的账号登录系统' : '自助注册，注册后即为普通用户' }}
-          </p>
+          <ul class="qr-list">
+            <li>发票登记与报销审批</li>
+            <li>合同台账与开票回款</li>
+            <li>发票查验与数据统计</li>
+          </ul>
 
-          <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent>
-            <el-form-item label="用户名" prop="username">
-              <el-input v-model="form.username" size="large" placeholder="请输入用户名" :prefix-icon="User" />
-            </el-form-item>
-
-            <el-form-item v-if="mode === 'register'" label="姓名" prop="display_name">
-              <el-input v-model="form.display_name" size="large" placeholder="真实姓名，用于审核显示" />
-            </el-form-item>
-
-            <el-form-item label="密码" prop="password">
-              <el-input
-                v-model="form.password" size="large" type="password" show-password
-                placeholder="请输入密码" :prefix-icon="Lock" @keyup.enter="submit"
-              />
-            </el-form-item>
-
-            <el-form-item v-if="mode === 'register'" label="确认密码" prop="password2">
-              <el-input
-                v-model="form.password2" size="large" type="password" show-password
-                placeholder="再输一次" :prefix-icon="Lock" @keyup.enter="submit"
-              />
-            </el-form-item>
-
-            <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon style="margin-bottom:14px" />
-
-            <el-button
-              type="primary" size="large" style="width:100%;height:44px;letter-spacing:4px"
-              :loading="loading" @click="submit"
-            >
-              {{ mode === 'login' ? '登 录' : '注册并登录' }}
-            </el-button>
-          </el-form>
-
-          <div style="margin-top:16px;text-align:center;font-size:13px">
-            <template v-if="mode === 'login'">
-              还没有账号？<el-link type="primary" :underline="false" @click="switchMode('register')">注册一个</el-link>
-            </template>
-            <template v-else>
-              已有账号？<el-link type="primary" :underline="false" @click="switchMode('login')">去登录</el-link>
-            </template>
+          <div class="qr-foot">
+            <span>服务状态：{{ statusText }}</span>
+            <span>构建 {{ build }}</span>
           </div>
         </div>
       </div>
+      <!-- 右：登录 -->
+      <div class="login-left">
+        <div class="login-head">
+          <span class="logo">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+              <path d="M12 2.6 21.4 7.4H2.6L12 2.6Z"/>
+              <rect x="4.6" y="9.1" width="2.5" height="8.2" rx=".5"/>
+              <rect x="10.75" y="9.1" width="2.5" height="8.2" rx=".5"/>
+              <rect x="16.9" y="9.1" width="2.5" height="8.2" rx=".5"/>
+              <rect x="2.9" y="18.4" width="18.2" height="2.5" rx=".7"/>
+            </svg>
+          </span>
+          <span class="head-name">人数行政平台</span>
+          <el-link
+            v-if="mode === 'login'"
+            type="primary" :underline="false" class="head-link"
+            @click="switchMode('register')"
+          >注册账号</el-link>
+          <el-link
+            v-else
+            type="primary" :underline="false" class="head-link"
+            @click="switchMode('login')"
+          >返回登录</el-link>
+        </div>
 
-      <div class="login-copy">© 2026 人数发票登记台账 · 温州信宇科技</div>
+        <div class="login-form">
+          <h2>{{ mode === 'login' ? '账号登录' : '注册账号' }}</h2>
+          <p class="login-tip">
+            {{ mode === 'login' ? '请使用管理员分配的账号登录' : '填写后即为普通用户，权限由管理员分配' }}
+          </p>
+
+          <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent>
+            <el-form-item prop="username">
+              <el-input
+                v-model="form.username" size="large" placeholder="用户名"
+                :prefix-icon="User" @keyup.enter="submit"
+              />
+            </el-form-item>
+
+            <el-form-item v-if="mode === 'register'" prop="display_name">
+              <el-input v-model="form.display_name" size="large" placeholder="姓名（用于审核显示）" />
+            </el-form-item>
+
+            <el-form-item prop="password">
+              <el-input
+                v-model="form.password" size="large" type="password" show-password
+                placeholder="密码" :prefix-icon="Lock" @keyup.enter="submit"
+              />
+            </el-form-item>
+
+            <el-form-item v-if="mode === 'register'" prop="password2">
+              <el-input
+                v-model="form.password2" size="large" type="password" show-password
+                placeholder="再输一次密码" :prefix-icon="Lock" @keyup.enter="submit"
+              />
+            </el-form-item>
+
+            <div v-if="mode === 'login'" class="login-row">
+              <el-checkbox v-model="remember">记住用户名</el-checkbox>
+              <el-link type="info" :underline="false" @click="forgot">忘记密码？</el-link>
+            </div>
+
+            <el-alert
+              v-if="error" :title="error" type="error" :closable="false"
+              show-icon style="margin-bottom:14px"
+            />
+
+            <el-button
+              type="primary" size="large" class="login-btn"
+              :loading="loading" @click="submit"
+            >
+              {{ mode === 'login' ? '登 录' : '注 册 并 登 录' }}
+            </el-button>
+          </el-form>
+        </div>
+      </div>
+
     </div>
+
+    <div class="login-copy">© 2026 人数行政平台 · 温州信宇科技</div>
   </div>
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import { api } from '../api'
-import { loadMe } from '../store'
+import { loadMe, state } from '../store'
 
 const router = useRouter()
 const route = useRoute()
@@ -82,6 +128,36 @@ const error = ref('')
 const formRef = ref(null)
 
 const form = reactive({ username: '', password: '', password2: '', display_name: '' })
+const remember = ref(true)
+const statusText = ref('检测中…')
+const build = ref(state.build || '—')
+
+const REMEMBER_KEY = 'invoice-last-user'
+
+onMounted(async () => {
+  // 记住上次登录的用户名
+  try {
+    const last = localStorage.getItem(REMEMBER_KEY)
+    if (last) {
+      form.username = last
+      remember.value = true
+    }
+  } catch (e) { /* 隐私模式下 localStorage 可能不可用 */ }
+
+  // 探一下服务是否正常（不阻塞界面）
+  try {
+    const r = await api.ping()
+    statusText.value = r.ok === false ? '异常' : '正常'
+    build.value = r.build || state.build || '—'
+  } catch (e) {
+    statusText.value = '连不上'
+  }
+})
+
+/** 忘了密码：系统里没有自助重置，只能找管理员 */
+function forgot() {
+  ElMessage.warning('请联系管理员重置密码（管理员在服务器上执行 部署/重置密码.sh）')
+}
 
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -119,6 +195,12 @@ async function submit() {
         password: form.password,
         display_name: form.display_name.trim() || form.username.trim()
       })
+    }
+    if (mode.value === 'login') {
+      try {
+        if (remember.value) localStorage.setItem(REMEMBER_KEY, form.username.trim())
+        else localStorage.removeItem(REMEMBER_KEY)
+      } catch (e) { /* 忽略 */ }
     }
     await loadMe()
     ElMessage.success(mode.value === 'login' ? '欢迎回来' : '注册成功')

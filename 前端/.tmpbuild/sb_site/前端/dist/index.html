@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>人数发票登记台账</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231B4F8C'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='%23C8A45C'%3E%E7%A5%A8%3C/text%3E%3C/svg%3E" />
+  <script>
+    /* 首屏渲染前先套用上次选的配色，避免闪一下默认色 */
+    (function () {
+      try {
+        var t = localStorage.getItem('invoice-skin');
+        if (t === 'a' || t === 'b' || t === 'c') {
+          document.documentElement.setAttribute('data-theme', t);
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <script type="module" crossorigin src="/assets/index-CQFHvusQ.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-8YqLOkw7.css">
+</head>
+<body>
+  <div id="app"></div>
+</body>
+</html>

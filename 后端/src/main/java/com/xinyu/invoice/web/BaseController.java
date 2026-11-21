@@ -33,6 +33,13 @@ public abstract class BaseController {
         return u;
     }
 
+    /** 要某个功能权限，没有就 403 */
+    protected Map<String, Object> requirePerm(HttpServletRequest req, String key) {
+        Map<String, Object> u = requireUser(req);
+        com.xinyu.invoice.auth.Perm.require(u, key);
+        return u;
+    }
+
     protected static long uid(Map<String, Object> user) {
         return SessionService.id(user);
     }

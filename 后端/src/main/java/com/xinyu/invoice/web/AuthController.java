@@ -45,6 +45,8 @@ public class AuthController extends BaseController {
         out.put("pending_reviews", pendingReviews());
         out.put("build", BUILD);
         out.put("can_open_local", canOpenLocal());
+        out.put("perms", com.xinyu.invoice.auth.Perm.of(u));
+        out.put("perm_all", com.xinyu.invoice.auth.Perm.ALL);
         return out;
     }
 

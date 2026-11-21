@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <div class="panel" style="padding:0">
       <div class="panel-hd">
@@ -16,6 +16,58 @@
           </el-col>
         </el-row>
 
+        <!-- 合同回款 -->
+        <div v-if="contract.totals" class="sec-title">
+          合同回款
+          <span class="sub">合同 <b>{{ contract.totals.contract_count }}</b> 份 ·
+            {{ contract.totals.project_count }} 个项目</span>
+        </div>
+        <el-row v-if="contract.totals" :gutter="12">
+          <el-col :span="6" style="margin-bottom:12px">
+            <div class="kpi" style="border-top-color:#1B4F8C">
+              <div class="kpi-k">收入合同额</div>
+              <div class="kpi-v" style="color:#1B4F8C">{{ money(contract.totals.income_total) }}</div>
+            </div>
+          </el-col>
+          <el-col :span="6" style="margin-bottom:12px">
+            <div class="kpi" style="border-top-color:#C8A45C">
+              <div class="kpi-k">已开票</div>
+              <div class="kpi-v" style="color:#C8A45C">{{ money(contract.totals.invoiced) }}</div>
+            </div>
+          </el-col>
+          <el-col :span="6" style="margin-bottom:12px">
+            <div class="kpi" style="border-top-color:#16A34A">
+              <div class="kpi-k">已回款</div>
+              <div class="kpi-v" style="color:#16A34A">{{ money(contract.totals.received) }}</div>
+            </div>
+          </el-col>
+          <el-col :span="6" style="margin-bottom:12px">
+            <div class="kpi" style="border-top-color:#DC2626">
+              <div class="kpi-k">外协应付 / 已付</div>
+              <div class="kpi-v" style="color:#DC2626">
+                {{ money(contract.totals.cost_total) }}
+                <small style="font-size:12px;color:#6B7280">
+                  / {{ money(contract.totals.cost_paid) }}
+                </small>
+              </div>
+            </div>
+          </el-col>
+        </el-row>
+        <el-alert
+          v-if="contract.totals && !contract.totals.income_total"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin:4px 0 12px"
+          title="合同金额还没录，所以这里都是 0"
+          description="去「合同台账」点开项目，每份合同点「编辑」把合同金额填上，这里的图表和比例就会动起来。"
+        />
+        <el-row v-else-if="contract.totals" :gutter="12">
+          <el-col :span="12"><div ref="unitRef" class="chart" /></el-col>
+          <el-col :span="12"><div ref="watchRef" class="chart" /></el-col>
+        </el-row>
+
+        <div class="sec-title">发票与查验</div>
         <div ref="trendRef" class="chart" />
         <el-row :gutter="12">
           <el-col :span="8"><div ref="reviewRef" class="chart" /></el-col>
@@ -28,7 +80,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
@@ -36,6 +88,8 @@ import { primaryColor, skinVersion } from '../theme'
 
 const data = ref({})
 const trendRef = ref(null)
+const unitRef = ref(null)
+const watchRef = ref(null)
 const reviewRef = ref(null)
 const auditRef = ref(null)
 const personRef = ref(null)
@@ -45,6 +99,12 @@ const sub = computed(() => {
   const o = data.value.overview || {}
   return `共 ${o.claims || 0} 张发票，${o.users || 0} 个在用账号`
 })
+
+const contract = reactive({ totals: null, by_unit: [], watch: [] })
+
+function money(v) {
+  return '¥' + Number(v || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
 
 const cards = computed(() => {
   const o = data.value.overview || {}
@@ -162,8 +222,81 @@ watch(skinVersion, () => {
   if (data.value.overview) draw(data.value)
 })
 
+async function loadContract() {
+  try {
+    const r = await api.contractsOverview()
+    contract.totals = r.totals
+    contract.by_unit = r.by_unit || []
+    contract.watch = r.watch || []
+    nextTick(() => drawContract())
+  } catch (e) {
+    // 合同模块没数据就不显示，不用报错
+  }
+}
+
+function drawContract() {
+  const primary = getComputedStyle(document.documentElement)
+    .getPropertyValue('--el-color-primary').trim() || '#1B4F8C'
+
+  if (unitRef.value) {
+    const units = contract.by_unit.slice(0, 8)
+    const chart = echarts.init(unitRef.value)
+    chart.setOption({
+      title: { text: '各单位收入合同额', left: 'center', textStyle: { fontSize: 13 } },
+      tooltip: { trigger: 'axis' },
+      grid: { left: 60, right: 20, top: 44, bottom: 60 },
+      xAxis: {
+        type: 'category',
+        data: units.map(x => x.unit),
+        axisLabel: { interval: 0, rotate: 30, fontSize: 11 }
+      },
+      yAxis: { type: 'value' },
+      series: [{
+        type: 'bar',
+        data: units.map(x => x.income),
+        barMaxWidth: 30,
+        itemStyle: { color: primary, borderRadius: [3, 3, 0, 0] }
+      }]
+    })
+    charts.push(chart)
+  }
+
+  if (watchRef.value) {
+    const list = contract.watch.slice(0, 8)
+    const chart = echarts.init(watchRef.value)
+    chart.setOption({
+      title: { text: '回款进度（未收最多的）', left: 'center', textStyle: { fontSize: 13 } },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (ps) => {
+          const i = ps[0].dataIndex
+          const w = list[i]
+          return `${w.project}<br/>应收 ${money(w.amount)}<br/>`
+            + `已收 ${money(w.received)}（${w.paid_ratio}%）<br/>`
+            + `未收 ${money(w.remain)}`
+        }
+      },
+      grid: { left: 110, right: 40, top: 44, bottom: 30 },
+      xAxis: { type: 'value' },
+      yAxis: {
+        type: 'category',
+        data: list.map(x => (x.project || '').slice(0, 10)),
+        axisLabel: { fontSize: 11 }
+      },
+      series: [{
+        type: 'bar',
+        data: list.map(x => x.remain),
+        barMaxWidth: 18,
+        itemStyle: { color: '#DC2626', borderRadius: [0, 3, 3, 0] }
+      }]
+    })
+    charts.push(chart)
+  }
+}
+
 onMounted(() => {
   load()
+  loadContract()
   window.addEventListener('resize', onResize)
 })
 
@@ -175,6 +308,13 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.sec-title {
+  margin: 16px 0 10px; padding-bottom: 6px;
+  font-size: 13px; font-weight: 600; color: #374151;
+  border-bottom: 1px solid #E5E7EB;
+  display: flex; align-items: baseline; gap: 10px;
+}
+.sec-title .sub { font-weight: 400; font-size: 12px; color: #9CA3AF; }
 .kpi {
   background: #fff; border: 1px solid #E5E7EB; border-top: 3px solid var(--el-color-primary);
   border-radius: 4px; padding: 12px 16px;

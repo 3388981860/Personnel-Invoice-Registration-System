@@ -120,6 +120,8 @@ public class InvoiceWriteRepo {
         Integer left = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM invoices WHERE batch_id = ?", Integer.class, batchId);
         if (left == null || left == 0) {
+            jdbc.update("DELETE FROM notifications WHERE batch_id = ?", batchId);
+            jdbc.update("DELETE FROM batch_payees WHERE batch_id = ?", batchId);
             jdbc.update("DELETE FROM batches WHERE id = ?", batchId);
         }
     }

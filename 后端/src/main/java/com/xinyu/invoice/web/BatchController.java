@@ -52,7 +52,7 @@ public class BatchController extends BaseController {
     @PostMapping("/api/batch/review")
     public Map<String, Object> review(@RequestBody Map<String, Object> body,
                                       HttpServletRequest req) {
-        Map<String, Object> admin = requireAdmin(req);
+        Map<String, Object> admin = requirePerm(req, "review");
         long bid = asLong(body.get("id"), "缺少报销单编号");
         String action = str(body.get("action")).strip();
         if (!"approve".equals(action) && !"return".equals(action)) {
@@ -288,6 +288,28 @@ public class BatchController extends BaseController {
                         + "WHERE batch_id = ?",
                 status, status == 1 ? stamp : null, stamp, bid);
         jdbc.update("UPDATE batches SET updated_at = ? WHERE id = ?", stamp, bid);
+        // 如果是外协付款单，打款后回填到合同里
+        Object cid = null;
+        List<Map<String, Object>> bRows = jdbc.queryForList(
+                "SELECT contract_id FROM batches WHERE id = ?", bid);
+        if (!bRows.isEmpty()) {
+            cid = bRows.get(0).get("contract_id");
+        }
+        if (cid instanceof Number n && status == 1) {
+            Double sum = jdbc.queryForObject(
+                    "SELECT COALESCE(SUM(amount),0) FROM invoices WHERE batch_id = ?",
+                    Double.class, bid);
+            String no = jdbc.queryForObject(
+                    "SELECT COALESCE(MIN(invoice_no),'') FROM invoices WHERE batch_id = ?",
+                    String.class, bid);
+            jdbc.update("INSERT INTO contract_billings (contract_id, kind, stage, amount, "
+                            + "ratio, no, happened_at, note, created_at) "
+                            + "VALUES (?,?,?,?,?,?,?,?,?)",
+                    n.longValue(), "payment", "外协付款", sum, null, no,
+                    java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")), "报销单 " + jdbc.queryForObject("SELECT COALESCE(batch_no,'') FROM batches WHERE id = ?", String.class, bid));
+            jdbc.update("UPDATE batches SET updated_at = ? WHERE id = ?", stamp, bid);
+        }
+
         writer.log(uid(admin), str(admin.get("username")), "batch_paid", "batch", bid,
                 status == 1 ? "整单标记已报销" : "整单改回未报销");
         Map<String, Object> after = query.detail(bid);

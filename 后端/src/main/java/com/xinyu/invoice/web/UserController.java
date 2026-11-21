@@ -18,7 +18,10 @@ public class UserController extends BaseController {
 
     @GetMapping("/api/users")
     public Map<String, Object> list(HttpServletRequest req) {
-        requireAdmin(req);
+        Map<String, Object> me = requireUser(req);
+        if (!com.xinyu.invoice.auth.SessionService.isAdmin(me)) {
+            throw new ApiException("这个操作需要管理员权限", 403);
+        }
         List<Map<String, Object>> users = new ArrayList<>();
         for (Map<String, Object> u : jdbc.queryForList(
                 "SELECT * FROM users ORDER BY id")) {
@@ -30,6 +33,9 @@ public class UserController extends BaseController {
             one.put("status", u.get("status") == null ? 0 : ((Number) u.get("status")).intValue());
             one.put("created_at", u.get("created_at"));
             one.put("last_login_at", u.get("last_login_at"));
+            one.put("perms", com.xinyu.invoice.auth.Perm.of(u));
+            one.put("perms_custom", u.get("perms") != null
+                    && !String.valueOf(u.get("perms")).isBlank());
             users.add(one);
         }
         return Map.of("ok", true, "users", users);
@@ -62,10 +68,14 @@ public class UserController extends BaseController {
             throw new ApiException("这个用户名已经被占用了", 409, "username");
         }
 
+        List<String> perms = body.containsKey("perms")
+                ? com.xinyu.invoice.auth.Perm.parse(body.get("perms"))
+                : new ArrayList<>(com.xinyu.invoice.auth.Perm.DEFAULT);
         jdbc.update("INSERT INTO users (username, password_hash, display_name, role, status,"
-                        + " must_change_pw, created_at) VALUES (?,?,?,?,?,?,?)",
+                        + " must_change_pw, perms, created_at) VALUES (?,?,?,?,?,?,?,?)",
                 username, PasswordTool.hash(password),
                 display.isEmpty() ? username : display, role, 1, 1,
+                com.xinyu.invoice.auth.Perm.serialize(perms),
                 LocalDateTime.now().format(TS));
 
         Long uid = jdbc.queryForObject(
@@ -113,6 +123,11 @@ public class UserController extends BaseController {
             fields.put("status", want);
             desc.add("状态→" + (want == 1 ? "启用" : "停用"));
         }
+        if (body.containsKey("perms")) {
+            List<String> perms = com.xinyu.invoice.auth.Perm.parse(body.get("perms"));
+            fields.put("perms", com.xinyu.invoice.auth.Perm.serialize(perms));
+            desc.add("权限→" + (perms.isEmpty() ? "无" : String.join("/", perms)));
+        }
         if (body.containsKey("role")) {
             String want = "admin".equals(str(body.get("role"))) ? "admin" : "user";
             if ("admin".equals(target.get("role")) && "user".equals(want) && countAdmins() <= 1) {
@@ -147,30 +162,6 @@ public class UserController extends BaseController {
         log(uid(admin), str(admin.get("username")), "user_update", "user", uid,
                 String.join("；", desc));
         return Map.of("ok", true);
-    }
-
-    @PostMapping("/api/users/reset_password")
-    public Map<String, Object> resetPassword(@RequestBody Map<String, Object> body,
-                                             HttpServletRequest req) {
-        Map<String, Object> admin = requireAdmin(req);
-        long uid = asLong(body.get("id"), "缺少用户编号");
-        Map<String, Object> target = jdbc.queryForList(
-                "SELECT * FROM users WHERE id = ?", uid).stream().findFirst().orElse(null);
-        if (target == null) {
-            throw new ApiException("找不到这个用户", 404);
-        }
-        String password = PasswordTool.newPassword(10);
-        jdbc.update("UPDATE users SET password_hash = ?, must_change_pw = 1 WHERE id = ?",
-                PasswordTool.hash(password), uid);
-        // 重置后旧会话立刻失效，避免旧密码登录的页面继续能用
-        sessions.deleteAllFor(uid);
-        log(uid(admin), str(admin.get("username")), "reset_password", "user", uid,
-                str(target.get("username")));
-
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("ok", true);
-        out.put("password", password);
-        return out;
     }
 
     // ---------------------------------------------------------------- 工具

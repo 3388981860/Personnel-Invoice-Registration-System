@@ -23,7 +23,7 @@ public class LogController extends BaseController {
                                     @RequestParam(required = false) String q,
                                     @RequestParam(required = false, defaultValue = "500") int limit,
                                     HttpServletRequest req) {
-        requireAdmin(req);
+        requirePerm(req, "logs");
 
         StringBuilder sql = new StringBuilder(
                 "SELECT * FROM audit_logs WHERE 1=1");

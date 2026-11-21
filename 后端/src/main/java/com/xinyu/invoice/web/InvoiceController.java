@@ -57,7 +57,7 @@ public class InvoiceController extends BaseController {
 
     @GetMapping("/api/stats/overview")
     public Map<String, Object> overview(HttpServletRequest req) {
-        Map<String, Object> u = requireAdmin(req);
+        Map<String, Object> u = requirePerm(req, "stats");
         Long owner = null;
 
         Map<String, Object> st = statsRepo.stats(owner);
@@ -89,9 +89,11 @@ public class InvoiceController extends BaseController {
                 "SELECT seller name, COUNT(*) count, ROUND(COALESCE(SUM(amount),0),2) amount "
                         + "FROM invoices WHERE seller IS NOT NULL AND seller <> '' "
                         + "GROUP BY seller ORDER BY amount DESC LIMIT 10"));
+        // 注意：invoices 表本身有 status 列（报销状态），别名再叫 status 会让
+        // SQLite 的 GROUP BY 认成表列，结果就变成按报销状态分组了。这里按表达式分组。
         out.put("by_audit", jdbc.queryForList(
-                "SELECT COALESCE(audit_status,0) status, COUNT(*) count FROM invoices "
-                        + "GROUP BY status ORDER BY status"));
+                "SELECT COALESCE(audit_status,0) AS status, COUNT(*) AS count FROM invoices "
+                        + "GROUP BY COALESCE(audit_status,0) ORDER BY 1"));
         return out;
     }
 

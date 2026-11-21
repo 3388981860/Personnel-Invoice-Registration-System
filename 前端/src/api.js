@@ -77,6 +77,15 @@ export const api = {
   // ---- 会话 ----
   me: () => get('/api/me'),
   ping: () => get('/api/ping'),
+
+  announcements: () => get('/api/announcements'),
+  announcementSave: (body) => post('/api/announcements/save', body),
+  announcementDelete: (body) => post('/api/announcements/delete', body),
+  announcementAck: (body) => post('/api/announcements/ack', body),
+
+  tools: () => get('/api/tools'),
+  toolSave: (body) => post('/api/tools/save', body),
+  toolDelete: (body) => post('/api/tools/delete', body),
   login: (username, password) => post('/api/login', { username, password }),
   register: (payload) => post('/api/register', payload),
   logout: () => post('/api/logout', {}),
@@ -131,9 +140,36 @@ export const api = {
   users: () => get('/api/users'),
   userCreate: (payload) => post('/api/users/create', payload),
   userUpdate: (payload) => post('/api/users/update', payload),
-  userResetPassword: (id) => post('/api/users/reset_password', { id }),
   logs: (query) => get('/api/logs', query),
 
   // ---- 导出 ----
-  exportUrl: (query) => buildUrl('/api/export', query)
+  exportUrl: (query) => buildUrl('/api/export', query),
+
+  // ---- 合同管理 ----
+  projects: (query) => get('/api/projects', query),
+  project: (id) => get('/api/project', { id }),
+  saveProject: (payload) => post('/api/project/save', payload),
+  deleteProject: (id) => post('/api/project/delete', { id }),
+  saveContract: (payload) => post('/api/contract/save', payload),
+  deleteContract: (id) => post('/api/contract/delete', { id }),
+  contractPay: (payload) => post('/api/contract/pay', payload),
+  contractsOverview: () => get('/api/contracts/overview'),
+  contractsExportUrl: () => '/api/contracts/export',
+  saveBilling: (payload) => post('/api/billing/save', payload),
+  deleteBilling: (id) => post('/api/billing/delete', { id }),
+  contractFileUrl: (id) => `/api/contract/file?id=${id}`,
+  contractUpload: (id, formData) => {
+    const url = buildUrl('/api/contract/upload', { id })
+    return fetch(url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: formData
+    }).then(async (resp) => {
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok || data.ok === false) {
+        throw new ApiError(data.error || '上传失败', resp.status)
+      }
+      return data
+    })
+  }
 }

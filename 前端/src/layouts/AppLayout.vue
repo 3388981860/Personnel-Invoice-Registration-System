@@ -1,12 +1,11 @@
-﻿<template>
+<template>
   <div class="app-shell">
     <!-- 左侧导航 -->
     <aside class="sidebar">
-      <div class="sb-logo"><span class="logo">票</span><b>发票台账</b></div>
+      <div class="sb-logo"><span class="logo"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 2.6 21.4 7.4H2.6L12 2.6Z"/><rect x="4.6" y="9.1" width="2.5" height="8.2" rx=".5"/><rect x="10.75" y="9.1" width="2.5" height="8.2" rx=".5"/><rect x="16.9" y="9.1" width="2.5" height="8.2" rx=".5"/><rect x="2.9" y="18.4" width="18.2" height="2.5" rx=".7"/><rect x="9.9" y="20.9" width="4.2" height="1.4" rx=".4"/></svg></span><b>人数行政平台</b></div>
 
       <nav class="sb-nav">
-        <template v-for="group in groups" :key="group.name">
-          <div v-if="group.name === '管理' && !isAdmin" style="display:none" />
+        <template v-for="group in visibleGroups" :key="group.name">
           <div class="sb-group">{{ group.name }}</div>
           <div
             v-for="item in group.items"
@@ -53,12 +52,16 @@
       <header class="topbar">
         <div class="crumb">{{ crumb }}</div>
 
-        <div class="top-stats">
-          <div class="top-stat"><b>{{ s.unpaid_batches || 0 }}</b><span class="u">单</span>待报销</div>
-          <div class="top-stat"><b>{{ s.unpaid?.count || 0 }}</b><span class="u">张</span>{{ money(s.unpaid?.amount) }}</div>
-          <div class="top-stat"><b>{{ s.month?.count || 0 }}</b><span class="u">张</span>本月</div>
-          <div class="top-stat"><b>{{ s.year?.count || 0 }}</b><span class="u">张</span>本年</div>
-          <div class="top-stat"><b>{{ s.total?.count || 0 }}</b><span class="u">张</span>累计</div>
+        <!-- 全局信息：最新公告 + 时间 -->
+        <div class="top-global">
+          <div v-if="latestNotice" class="g-notice" @click="goNotice">
+            <el-icon><Bell /></el-icon>
+            <span class="g-label">公告</span>
+            <span class="g-text ellipsis">{{ latestNotice.title }}</span>
+          </div>
+          <div class="g-clock">
+            <span class="g-time">{{ clockText }}</span>
+          </div>
         </div>
 
         <div class="top-actions">
@@ -94,16 +97,16 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  EditPen, Tickets, Clock, DataAnalysis, User, Document,
-  FolderOpened, Coin, Bell, ArrowDown, Setting, SwitchButton
+  EditPen, Tickets, Clock, Files, DataAnalysis, User, Document,
+  FolderOpened, Coin, Bell, ArrowDown, Setting, SwitchButton, Box
 } from '@element-plus/icons-vue'
 
 import { api } from '../api'
-import { state, isAdmin, refreshBadges, applyStats } from '../store'
+import { state, isAdmin, can, refreshBadges, applyStats } from '../store'
 import { SKINS, skin, applySkin } from '../theme'
 import AccountDialog from '../components/AccountDialog.vue'
 import NotifyDrawer from '../components/NotifyDrawer.vue'
@@ -113,26 +116,67 @@ const router = useRouter()
 const accountVisible = ref(false)
 const notifyVisible = ref(false)
 
-const groups = [
+const allGroups = [
   {
     name: '业务',
     items: [
       { name: 'entry', title: '新建报销单', icon: EditPen },
-      { name: 'ledger', title: '登记台账', icon: Tickets },
-      { name: 'pending', title: '待审核', icon: Clock }
+      { name: 'ledger', title: '发票登记', icon: Tickets },
+      { name: 'pending', title: '待审核', icon: Clock, perm: 'review' },
+      { name: 'contracts', title: '合同台账', icon: Files, perm: 'contracts' },
+  { name: 'notice', title: '公告', icon: Bell },
+  { name: 'tools', title: '工具箱', icon: Box }
     ]
   },
   {
     name: '管理',
     items: [
-      { name: 'stats', title: '数据总览', icon: DataAnalysis },
-      { name: 'users', title: '用户管理', icon: User },
-      { name: 'logs', title: '操作日志', icon: Document }
+      { name: 'stats', title: '数据总览', icon: DataAnalysis, perm: 'stats' },
+      { name: 'users', title: '用户管理', icon: User, perm: 'users' },
+      { name: 'logs', title: '操作日志', icon: Document, perm: 'logs' }
     ]
   }
 ]
 
+/** 只留下有权限的菜单项；整组都空就不显示这一组 */
+const visibleGroups = computed(() =>
+  allGroups
+    .map(g => ({
+      ...g,
+      items: g.items.filter(it => !it.perm || can(it.perm))
+    }))
+    .filter(g => g.items.length > 0)
+)
+
 const s = computed(() => state.stats || {})
+/** 顶栏最新公告 */
+const latestNotice = ref(null)
+
+/** 顶栏时钟 */
+const clockText = ref('')
+let clockTimer = null
+
+function tickClock() {
+  const d = new Date()
+  const p = n => String(n).padStart(2, '0')
+  const wd = '日一二三四五六'[d.getDay()]
+  clockText.value = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} 周${wd} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+async function loadLatestNotice() {
+  try {
+    const r = await api.announcements()
+    const list = r.announcements || []
+    latestNotice.value = list.length ? list[0] : null
+  } catch (e) {
+    latestNotice.value = null
+  }
+}
+
+function goNotice() {
+  router.push({ name: 'notice' })
+}
+
 const crumb = computed(() => {
   const m = route.meta || {}
   return m.title ? `${m.group} · ${m.title}` : ''
@@ -169,6 +213,10 @@ function openNotify() {
   notifyVisible.value = true
 }
 
+onBeforeUnmount(() => {
+  if (clockTimer) clearInterval(clockTimer)
+})
+
 function onNotifyRead(unread) {
   state.unread = unread
 }
@@ -192,6 +240,9 @@ function onAccountSaved() {
 }
 
 onMounted(async () => {
+  tickClock()
+  clockTimer = setInterval(tickClock, 30000)
+  loadLatestNotice()
   try {
     const r = await api.list({ limit: 1 })
     applyStats(r.stats)

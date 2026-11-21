@@ -35,7 +35,7 @@ public class AuditController extends BaseController {
 
     @GetMapping("/api/audit/status")
     public Map<String, Object> status(HttpServletRequest req) {
-        requireAdmin(req);
+        requirePerm(req, "audit");
         Map<String, Object> out = new LinkedHashMap<>(audit.status());
         out.put("stats", statsRepo.stats(null));
         return out;
@@ -44,7 +44,7 @@ public class AuditController extends BaseController {
     @PostMapping("/api/audit/start")
     public Map<String, Object> start(@RequestBody Map<String, Object> body,
                                      HttpServletRequest req) {
-        requireAdmin(req);
+        requirePerm(req, "audit");
         List<Long> ids = new ArrayList<>();
         Object raw = body.get("ids");
         if (raw instanceof List<?> list) {
@@ -66,7 +66,7 @@ public class AuditController extends BaseController {
 
     @PostMapping("/api/audit/stop")
     public Map<String, Object> stop(HttpServletRequest req) {
-        requireAdmin(req);
+        requirePerm(req, "audit");
         Map<String, Object> out = new LinkedHashMap<>(audit.stop());
         out.put("stats", statsRepo.stats(null));
         return out;
@@ -76,7 +76,7 @@ public class AuditController extends BaseController {
     @GetMapping("/api/audit/shot")
     public ResponseEntity<byte[]> shot(@RequestParam String id, HttpServletRequest req)
             throws Exception {
-        requireAdmin(req);
+        requirePerm(req, "audit");
         List<Map<String, Object>> rows = jdbc.queryForList(
                 "SELECT audit_shot FROM invoices WHERE id = ?", Long.parseLong(id));
         Object rel = rows.isEmpty() ? null : rows.get(0).get("audit_shot");

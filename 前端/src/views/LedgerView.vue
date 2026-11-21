@@ -2,8 +2,22 @@
   <div>
     <div class="panel">
       <div class="panel-hd">
-        <span>{{ isPendingView ? '待审核' : '登记台账' }}</span>
+        <span>{{ isPendingView ? '待审核' : '发票登记' }}</span>
         <span class="sub">{{ auditSummary }}</span>
+
+        <!-- 发票统计（原来在顶栏，系统不止发票了，挪到这里） -->
+        <div class="ledger-stats">
+          <div class="ls-item">
+            <b>{{ stats?.unpaid_batches || 0 }}</b><span class="u">单</span><span class="l">待报销</span>
+          </div>
+          <div class="ls-item">
+            <b>{{ stats?.unpaid?.count || 0 }}</b><span class="u">张</span>
+            <span class="l">{{ money(stats?.unpaid?.amount) }} 未报销</span>
+          </div>
+          <div class="ls-item"><b>{{ stats?.month?.count || 0 }}</b><span class="u">张</span><span class="l">本月</span></div>
+          <div class="ls-item"><b>{{ stats?.year?.count || 0 }}</b><span class="u">张</span><span class="l">本年</span></div>
+          <div class="ls-item"><b>{{ stats?.total?.count || 0 }}</b><span class="u">张</span><span class="l">累计</span></div>
+        </div>
       </div>
 
       <!-- 筛选 -->
@@ -50,7 +64,12 @@
 
       <!-- 批量操作 -->
       <div v-if="selection.length" class="selbar">
-        <span>已选 <b>{{ selection.length }}</b> 张</span>
+        <span>
+          已选 <b>{{ selection.length }}</b> 张
+          <span v-if="selectedOnOtherPages > 0" class="other-page">
+            （其中 {{ selectedOnOtherPages }} 张在其它页）
+          </span>
+        </span>
         <el-button v-if="isAdmin" size="small" @click="startAudit">查验选中</el-button>
         <el-button size="small" @click="attachDialog = true">加入报销单</el-button>
         <el-button size="small" @click="detachSelected">从单里拆出</el-button>
@@ -62,13 +81,14 @@
         ref="tableRef"
         v-loading="loading"
         :data="pageRows"
+        row-key="id"
         border
         size="small"
         style="width:100%"
         @selection-change="onSelect"
         @row-click="onRowClick"
       >
-        <el-table-column type="selection" width="46" />
+        <el-table-column type="selection" width="46" reserve-selection />
         <el-table-column label="报销单号" width="176">
           <template #default="{ row }">
             <el-link v-if="row.batch_id" type="primary" @click.stop="openBatch(row.batch_id)">
@@ -127,7 +147,9 @@
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click.stop="openInvoice(row.id)">详情</el-button>
             <el-button v-if="canDeleteRow(row)" link type="danger" size="small" @click.stop="removeRow(row)">删除</el-button>
-            <span v-else-if="!canEditRow(row)" class="text-muted" style="font-size:12px">已锁</span>
+            <el-tooltip v-else-if="!canEditRow(row)" :content="lockReason(row)" placement="top">
+              <el-icon class="lock-ico"><Lock /></el-icon>
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>
@@ -191,6 +213,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { Lock } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
@@ -210,6 +233,7 @@ const stats = ref(null)
 const filters = reactive({ q: '', person: '', month: '', status: '', audit: '', batch: '', review: '' })
 const selection = ref([])
 const page = ref(1)
+const tableRef = ref(null)
 const pageSize = ref(20)
 
 const drawerVisible = ref(false)
@@ -225,6 +249,12 @@ const audit = reactive({ running: false, total: 0, done: 0, ok: 0, fail: 0, skip
 let auditTimer = null
 
 const isPendingView = computed(() => route.name === 'pending')
+// 勾选跨页保留（表格用了 reserve-selection），翻页不清空；
+// 但改了筛选条件就得清，否则会操作到已经筛掉、看不见的发票
+watch(() => [filters.q, filters.person, filters.month, filters.status,
+             filters.audit, filters.batch, filters.review],
+      () => clearSelection())
+
 const pageCount = computed(() => Math.max(1, Math.ceil(rows.value.length / pageSize.value)))
 const pageRows = computed(() => {
   const start = (page.value - 1) * pageSize.value
@@ -254,6 +284,13 @@ function payeeTip(row) {
   const names = String(row.payee_names || '').split('、').filter(Boolean)
   if (names.length <= 1) return names[0] || ''
   return names.join('、')
+}
+
+/** 为什么这张票锁着：说清楚，别让人猜 */
+function lockReason(row) {
+  if (row.batch_review === 'approved') return '单据已通过审核，不能再改'
+  if (Number(row.status) === 1) return '这张已经报销，已锁定'
+  return '没有修改权限'
 }
 
 function auditText(s) {
@@ -297,7 +334,22 @@ async function reload() {
 }
 
 function onSelect(list) { selection.value = list }
-function clearSelection() { selection.value = [] }
+
+/** 选中的里面有多少张不在当前页（跨页保留） */
+const selectedOnOtherPages = computed(() => {
+  const ids = new Set(pageRows.value.map(r => r.id))
+  return selection.value.filter(r => !ids.has(r.id)).length
+})
+
+/**
+ * 取消选择。
+ * 只把 selection 数组清空是不够的——表格内部的勾选框还亮着，
+ * 会变成「全都没勾上但方框还是勾的」。必须调表格自己的 clearSelection。
+ */
+function clearSelection() {
+  tableRef.value?.clearSelection()
+  selection.value = []
+}
 
 function onRowClick(row, col, ev) {
   // 点开关、勾选框、按钮、链接时不要顺带打开详情
@@ -444,6 +496,19 @@ onMounted(reload)
 </script>
 
 <style scoped>
+.ledger-stats {
+  display: flex; align-items: center; gap: 22px;
+  margin-left: auto; padding-right: 4px;
+}
+.ls-item { display: flex; align-items: baseline; gap: 3px; font-size: 12.5px; color: #6B7280; }
+.ls-item b { font-size: 17px; font-weight: 700; color: var(--brand-text); }
+.ls-item .u { font-size: 11px; color: #9AA6B6; }
+.ls-item .l { color: #6B7280; }
+.lock-ico {
+  color: #8A94A6; font-size: 16px; cursor: help;
+  vertical-align: middle; margin-top: 2px;
+}
+.lock-ico:hover { color: var(--el-color-primary); }
 .payee-cell {
   display: inline-block; max-width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -451,6 +516,7 @@ onMounted(reload)
 }
 .payee-cell.other { color: #E6A23C; }
 
+.other-page { color: var(--brand-text-3); font-size: 12px; }
 .selbar {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 16px;

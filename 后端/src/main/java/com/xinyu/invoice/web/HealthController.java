@@ -31,7 +31,7 @@ public class HealthController extends BaseController {
     public Map<String, Object> ping(jakarta.servlet.http.HttpServletRequest req) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ok", true);
-        out.put("app", "invoice-book");
+        out.put("app", "renshu-admin");
         out.put("platform", System.getProperty("os.name", "").toLowerCase()
                 .contains("win") ? "win32" : "linux");
         out.put("can_open_local", System.getProperty("os.name", "").toLowerCase()

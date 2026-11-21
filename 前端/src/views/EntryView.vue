@@ -22,18 +22,18 @@
         <!-- 单据信息 -->
         <el-form :model="form" label-position="top" style="flex:1">
           <el-row :gutter="12">
-            <el-col :span="12">
+            <el-col :span="8">
               <el-form-item label="报销人" required>
                 <el-input v-model="form.person" placeholder="谁报销" />
               </el-form-item>
             </el-col>
-            <el-col :span="12">
+            <el-col :span="8">
               <el-form-item label="报销日期">
                 <el-date-picker v-model="form.reimburse_date" type="date"
                                 value-format="YYYY-MM-DD" style="width:100%" />
               </el-form-item>
             </el-col>
-            <el-col :span="12">
+            <el-col :span="8">
               <el-form-item label="报销单号">
                 <el-input v-model="form.batch_no" placeholder="留空自动生成" />
               </el-form-item>

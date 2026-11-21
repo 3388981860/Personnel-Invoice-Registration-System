@@ -49,6 +49,109 @@ public class SchemaMigrator implements ApplicationRunner {
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_payees_batch "
                 + "ON batch_payees(batch_id)");
 
+        // ---------------------------------------------------------------- 合同管理
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS projects (
+                  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                  code       TEXT,
+                  name       TEXT NOT NULL,
+                  unit       TEXT,
+                  start_date TEXT,
+                  end_date   TEXT,
+                  owner_id   INTEGER,
+                  note       TEXT,
+                  created_at TEXT,
+                  updated_at TEXT
+                )
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS contracts (
+                  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                  project_id  INTEGER NOT NULL,
+                  kind        TEXT NOT NULL DEFAULT 'income',
+                  party_a     TEXT,
+                  party_b     TEXT,
+                  contract_no TEXT,
+                  amount      REAL,
+                  signed      TEXT,
+                  signed_at   TEXT,
+                  file_rel    TEXT,
+                  file_name   TEXT,
+                  note        TEXT,
+                  sort        INTEGER DEFAULT 0,
+                  created_at  TEXT,
+                  updated_at  TEXT
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_contracts_project "
+                + "ON contracts(project_id)");
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS contract_billings (
+                  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                  contract_id INTEGER NOT NULL,
+                  kind        TEXT NOT NULL,
+                  stage       TEXT,
+                  amount      REAL,
+                  ratio       REAL,
+                  no          TEXT,
+                  happened_at TEXT,
+                  file_rel    TEXT,
+                  note        TEXT,
+                  created_at  TEXT
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_billings_contract "
+                + "ON contract_billings(contract_id)");
+
+        // 公告
+        jdbc.execute("CREATE TABLE IF NOT EXISTS announcements ("
+                + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + "title TEXT NOT NULL,"
+                + "content TEXT NOT NULL,"
+                + "created_by INTEGER,"
+                + "created_at TEXT)");
+        try {
+            jdbc.queryForList("SELECT announcement_id FROM notifications LIMIT 1");
+        } catch (Exception e) {
+            jdbc.execute("ALTER TABLE notifications ADD COLUMN announcement_id INTEGER");
+            log.info("notifications 表已补 announcement_id 列");
+        }
+
+        // 工具箱（把外部小工具挂进来）
+        jdbc.execute("CREATE TABLE IF NOT EXISTS tools ("
+                + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + "name TEXT NOT NULL,"
+                + "url TEXT,"
+                + "description TEXT,"
+                + "icon TEXT,"
+                + "category TEXT,"
+                + "sort_no INTEGER DEFAULT 0,"
+                + "enabled INTEGER DEFAULT 1)");
+        Integer toolCount = jdbc.queryForObject("SELECT COUNT(*) FROM tools", Integer.class);
+        if (toolCount == null || toolCount == 0) {
+            jdbc.update("INSERT INTO tools (name, url, description, icon, category, sort_no, enabled)"
+                    + " VALUES ('公文助手', '', '公文智能排版工具', '📝', '公文', 10, 1)");
+            jdbc.update("INSERT INTO tools (name, url, description, icon, category, sort_no, enabled)"
+                    + " VALUES ('PDF 工具箱', '', 'PDF 合并、拆分、转换', '📄', '工具', 20, 1)");
+            log.info("工具箱已预置：公文助手 / PDF 工具箱（地址待填）");
+        }
+
+        // 用户功能权限（JSON 数组，null = 用默认）
+        try {
+            jdbc.queryForList("SELECT perms FROM users LIMIT 1");
+        } catch (Exception e) {
+            jdbc.execute("ALTER TABLE users ADD COLUMN perms TEXT");
+            log.info("users 表已补 perms 列");
+        }
+
+        // 报销单关联合同（外协付款单用）
+        try {
+            jdbc.queryForList("SELECT contract_id FROM batches LIMIT 1");
+        } catch (Exception e) {
+            jdbc.execute("ALTER TABLE batches ADD COLUMN contract_id INTEGER");
+            log.info("batches 表已补 contract_id 列");
+        }
+
         // 老数据：每张单补一条收款记录（金额 = 单合计，收款人 = 发票上的收款人）
         int n = jdbc.update("""
                 INSERT INTO batch_payees (batch_id, name, amount, note, sort, created_at)

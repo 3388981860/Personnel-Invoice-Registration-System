@@ -108,7 +108,7 @@ BROWSER_DIR="$APP_DIR/.cache/ms-playwright"
 
 cat > /etc/systemd/system/invoice-parse.service <<UNIT
 [Unit]
-Description=发票解析小服务（PDF/OFD 识别）
+Description=人数行政平台 - 发票解析服务（PDF/OFD 识别）
 After=network.target
 
 [Service]
@@ -127,7 +127,7 @@ UNIT
 
 cat > /etc/systemd/system/invoice-audit.service <<UNIT
 [Unit]
-Description=发票查验小服务（Playwright + 验证码 OCR）
+Description=人数行政平台 - 发票查验服务（Playwright + 验证码 OCR）
 After=network.target
 
 [Service]
@@ -158,7 +158,7 @@ fi
 
 cat > /etc/systemd/system/invoice-java.service <<UNIT
 [Unit]
-Description=人数发票登记台账（Spring Boot）
+Description=人数行政平台（Spring Boot）
 After=network.target invoice-parse.service invoice-audit.service
 Wants=invoice-parse.service invoice-audit.service
 

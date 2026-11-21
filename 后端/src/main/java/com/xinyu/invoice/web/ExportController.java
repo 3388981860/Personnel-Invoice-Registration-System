@@ -27,7 +27,7 @@ public class ExportController extends BaseController {
 
     @GetMapping("/api/export")
     public ResponseEntity<byte[]> export(HttpServletRequest req) throws Exception {
-        Map<String, Object> u = requireUser(req);
+        Map<String, Object> u = requirePerm(req, "export");
         // 普通用户只导出自己的
         Long owner = SessionService.isAdmin(u) ? null : uid(u);
 

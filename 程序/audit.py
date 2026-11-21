@@ -34,6 +34,30 @@ MODEL_DIR = os.path.join(CAPTCHA_DIR, "模型")                    # 程序\审�
 SHOT_DIR = os.path.join(BASE, "数据", "查验截图")
 TEMP_DIR = os.path.join(BASE, "数据", "临时")
 
+# 识别失败的验证码存这儿，方便以后判断是图糊还是模型不行
+CAPTCHA_FAIL_DIR = os.path.join(BASE, "数据", "查验截图", "失败样本")
+_LAST_CAPTCHA_RAW = None
+
+
+def _save_captcha_fail(raw_path):
+    """把认不出的验证码另存一份（只留最近 200 张）。"""
+    try:
+        if not raw_path or not os.path.isfile(raw_path):
+            return
+        os.makedirs(CAPTCHA_FAIL_DIR, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        dst = os.path.join(CAPTCHA_FAIL_DIR, "%s_%s.png" % (stamp, uuid.uuid4().hex[:6]))
+        import shutil
+        shutil.copy2(raw_path, dst)
+        files = sorted(os.listdir(CAPTCHA_FAIL_DIR))
+        for old in files[:-200]:
+            try:
+                os.remove(os.path.join(CAPTCHA_FAIL_DIR, old))
+            except OSError:
+                pass
+    except Exception:
+        pass
+
 
 def _browser_dir_ready(path):
     """
@@ -75,6 +99,7 @@ CONFIG = {
     "retries": 2,              # 单张发票整体重试次数
     "captcha_tries": 6,        # 连续识别不出验证码时的尝试次数
     "captcha_rounds": 4,       # 验证码被平台判错后，最多重来几轮
+    "captcha_timeout": 10,     # 等验证码接口响应的秒数，超时说明平台没响应
     # 超过这个秒数还打不开查验平台，就当网络不通，直接给结论，别一直挂着
     "page_timeout": 25,
     # 单张发票的总预算（秒）。超了就放弃这张，避免"点了一下半天没反应"
@@ -418,11 +443,14 @@ def _solve_captcha(page, sel, recognizer, color_parser):
     # 有校验弹窗（比如"请输入发票号码!"）时先关掉，否则点不到图片
     _dismiss_popup(page, sel)
 
+    global _CAPTCHA_TIMEOUTS
     try:
         with page.expect_response(lambda r: sel["captcha_resp"] in r.url,
-                                  timeout=20000) as info:
+                                   timeout=CONFIG["captcha_timeout"] * 1000) as info:
             page.locator(sel["yzm_img"]).first.click(timeout=6000)
     except Exception:
+        # 没等到验证码接口响应：多半被限流，不是识别问题
+        _CAPTCHA_TIMEOUTS += 1
         return ""
     data = _parse_body(info.value.text())
 
@@ -446,6 +474,7 @@ def _solve_captcha(page, sel, recognizer, color_parser):
             img = color_parser.remove_background_color(img, bg)
         color_parser.filter_by_color(img, str(color or "00")).save(filtered)
         result = json.loads(recognizer.infer_json(filtered))
+        globals()["_CAPTCHA_TIMEOUTS"] = 0
         if result.get("scores", 0) < 0.99:
             return ""
         return result.get("txts", "")
@@ -750,7 +779,16 @@ def _verify_once(page, query, sel, recognizer, color_parser, log=None, abort=Non
                 break
             time.sleep(0.8)
         if not text:
-            return AUDIT_NONE, "验证码连续识别失败（图片太糊或模型没加载）", "", None
+            _save_captcha_fail(_LAST_CAPTCHA_RAW)
+            model_ok = True
+            try:
+                model_ok = bool(model_ready())
+            except Exception:
+                pass
+            return (AUDIT_NONE,
+                    "验证码没认出来（不是发票的问题），再点一次「查验」通常就好了"
+                    if model_ok else
+                    "OCR 模型没加载，请联系管理员检查 程序/审核/模型", "", None)
 
         try:
             page.locator(sel["yzm"]).fill(text, timeout=10000)

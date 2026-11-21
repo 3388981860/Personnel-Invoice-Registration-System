@@ -166,6 +166,9 @@ public class BatchQueryRepo {
             }
             jdbc.update("DELETE FROM invoices WHERE id = ?", rid);
         }
+        // 通知里点进去会找不到单，一起删掉
+        jdbc.update("DELETE FROM notifications WHERE batch_id = ?", bid);
+        jdbc.update("DELETE FROM batch_payees WHERE batch_id = ?", bid);
         jdbc.update("DELETE FROM batches WHERE id = ?", bid);
         return invs.size();
     }
