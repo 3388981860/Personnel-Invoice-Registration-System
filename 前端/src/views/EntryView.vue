@@ -28,13 +28,9 @@
               </el-form-item>
             </el-col>
             <el-col :span="12">
-              <el-form-item label="收款人" required>
-                <el-input v-model="form.payee" placeholder="钱打给谁" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
               <el-form-item label="报销日期">
-                <el-date-picker v-model="form.reimburse_date" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+                <el-date-picker v-model="form.reimburse_date" type="date"
+                                value-format="YYYY-MM-DD" style="width:100%" />
               </el-form-item>
             </el-col>
             <el-col :span="12">
@@ -97,6 +93,51 @@
         </el-table>
       </div>
 
+      <!-- 收款信息 -->
+      <div class="pay-bar">
+        <b style="font-size:13px">收款信息</b>
+        <span class="pay-sum">
+          合计 <b :class="payDiff === 0 ? 'ok' : 'bad'">{{ money(payTotal) }}</b>
+          / 单合计 {{ money(total) }}
+          <span v-if="payDiff !== 0" class="bad">
+            （{{ payDiff > 0 ? '还差' : '多了' }} {{ money(Math.abs(payDiff)) }}）
+          </span>
+          <span v-else class="ok"> ✓ 对上了</span>
+        </span>
+        <span class="pay-ops">
+          <el-button size="small" @click="fillFromInvoices">带出收款人</el-button>
+          <el-button size="small" @click="splitEvenly">按人平分</el-button>
+          <el-button size="small" @click="addPayee">+ 添加一行</el-button>
+        </span>
+      </div>
+
+      <div style="padding:0 16px">
+        <el-table :data="payees" size="small" border empty-text="还没有收款人，点「+ 添加一行」或「带出收款人」">
+          <el-table-column type="index" width="46" />
+          <el-table-column label="收款人" width="200">
+            <template #default="{ row }">
+              <el-input v-model="row.name" size="small" placeholder="钱打给谁" />
+            </template>
+          </el-table-column>
+          <el-table-column label="金额" width="150" align="center">
+            <template #default="{ row }">
+              <el-input v-model="row.amount" size="small" style="text-align:right"
+                        placeholder="0.00" />
+            </template>
+          </el-table-column>
+          <el-table-column label="备注">
+            <template #default="{ row }">
+              <el-input v-model="row.note" size="small" placeholder="选填，例如：垫付过路费" />
+            </template>
+          </el-table-column>
+          <el-table-column width="72" align="center">
+            <template #default="{ $index }">
+              <el-button link type="danger" size="small" @click="removePayee($index)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
       <div style="display:flex;align-items:center;gap:10px;padding:14px 16px 16px">
         <el-button @click="addRow">+ 手工加一行</el-button>
         <el-button type="primary" :loading="submitting" @click="submit">提交报销单</el-button>
@@ -129,8 +170,46 @@ const form = reactive({
   person: '', payee: '', reimburse_date: iso, batch_no: '', note: ''
 })
 const items = ref([])
+// 收款信息：一行 = 一个人 + 一笔金额
+const payees = ref([])
 
 const total = computed(() => items.value.reduce((s, x) => s + (Number(x.amount) || 0), 0))
+const payTotal = computed(() =>
+  payees.value.reduce((s, x) => s + (Number(x.amount) || 0), 0))
+const payDiff = computed(() => Math.round((total.value - payTotal.value) * 100) / 100)
+
+function addPayee() {
+  payees.value.push({ name: '', amount: '', note: '' })
+}
+function removePayee(i) {
+  payees.value.splice(i, 1)
+}
+/** 按发票上的收款人带出来（同名合并，金额累加） */
+function fillFromInvoices() {
+  if (!items.value.length) return ElMessage.warning('本单还没有发票')
+  const map = new Map()
+  for (const it of items.value) {
+    const name = String(it.payee || form.person || '未填').trim()
+    map.set(name, (map.get(name) || 0) + (Number(it.amount) || 0))
+  }
+  payees.value = [...map.entries()].map(([name, amt]) => ({
+    name, amount: amt.toFixed(2), note: ''
+  }))
+}
+/** 平分：最后一个人兜住零头，保证合计一分不差 */
+function splitEvenly() {
+  const n = Math.max(1, payees.value.length)
+  if (!payees.value.length) {
+    payees.value = [{ name: '', amount: '', note: '' }]
+  }
+  const totalCents = Math.round(total.value * 100)
+  const base = Math.floor(totalCents / n)
+  const rest = totalCents - base * n
+  payees.value.forEach((p, i) => {
+    const cents = base + (i === n - 1 ? rest : 0)
+    p.amount = (cents / 100).toFixed(2)
+  })
+}
 
 function money(v) {
   return '¥' + Number(v || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
@@ -193,17 +272,36 @@ function clearAll() {
 
 async function submit() {
   if (!form.person.trim()) return ElMessage.warning('请填写报销人')
-  if (!form.payee.trim()) return ElMessage.warning('请填写收款人')
   if (!items.value.length) return ElMessage.warning('本单还没有发票')
   if (items.value.some(x => !String(x.invoice_no).trim())) {
     return ElMessage.warning('有发票号码是空的，请补上')
+  }
+  // 收款信息：必须有、姓名必须有、金额必须和单合计一分不差
+  if (!payees.value.length) {
+    return ElMessage.warning('请填写收款信息：钱付给谁、每个人多少')
+  }
+  if (payees.value.some(p => !String(p.name).trim())) {
+    return ElMessage.warning('有收款人没填姓名')
+  }
+  if (payees.value.some(p => !(Number(p.amount) > 0))) {
+    return ElMessage.warning('有收款人的金额还没填')
+  }
+  if (payDiff.value !== 0) {
+    return ElMessage.warning(
+      `收款合计 ${money(payTotal.value)}，发票合计 ${money(total.value)}，` +
+      `${payDiff.value > 0 ? '还差' : '多了'} ${money(Math.abs(payDiff.value))}`)
   }
 
   submitting.value = true
   try {
     const r = await api.batchAdd({
       person: form.person.trim(),
-      payee: form.payee.trim(),
+      payee: String(payees.value[0]?.name || form.person).trim(),
+      payees: payees.value.map(p => ({
+        name: String(p.name).trim(),
+        amount: Number(p.amount) || 0,
+        note: String(p.note || '').trim()
+      })),
       reimburse_date: form.reimburse_date || '',
       batch_no: form.batch_no.trim(),
       note: form.note.trim(),
@@ -212,6 +310,7 @@ async function submit() {
     applyStats(r.stats)
     ElMessage.success(`已提交报销单 ${r.batch_no || ''}`)
     items.value = []
+    payees.value = []
     form.batch_no = ''
     form.note = ''
     router.push({ name: 'ledger' })
@@ -224,6 +323,14 @@ async function submit() {
 </script>
 
 <style scoped>
+.pay-bar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 16px 8px; flex-wrap: wrap;
+}
+.pay-sum { font-size: 12.5px; color: #6B7280; }
+.pay-sum .ok { color: #16A34A; }
+.pay-sum .bad { color: #DC2626; }
+.pay-ops { margin-left: auto; display: flex; gap: 8px; }
 .drop {
   flex: 0 0 240px; height: 150px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;

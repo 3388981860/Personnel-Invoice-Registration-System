@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <div class="panel">
       <div class="panel-hd">
@@ -38,6 +38,9 @@
           <el-option label="已通过" value="approved" />
         </el-select>
         <el-button @click="reload">刷新</el-button>
+        <el-button v-if="isAdmin" type="primary" :loading="auditChecking" @click="auditClick">
+          查验
+        </el-button>
         <el-button type="primary" plain @click="exportExcel">导出</el-button>
         <span class="text-muted" style="margin-left:auto;font-size:12.5px">
           共 {{ rows.length }} 条　合计 {{ money(stats?.total?.amount) }}　
@@ -84,12 +87,22 @@
           <template #default="{ row }"><span class="money">{{ money(row.amount) }}</span></template>
         </el-table-column>
         <el-table-column prop="person" label="报销人" width="92" />
-        <el-table-column label="收款人" width="100">
+        <el-table-column label="收款人" width="128">
           <template #default="{ row }">
-            <el-tag v-if="row.payee && row.person && row.payee !== row.person" size="small" type="warning" effect="plain">
-              {{ row.payee }}
-            </el-tag>
-            <span v-else>{{ row.payee || '—' }}</span>
+            <el-tooltip
+              v-if="row.payee_names"
+              :content="payeeTip(row)"
+              placement="top"
+              :show-after="200"
+            >
+              <span class="payee-cell">{{ payeeLabel(row) }}</span>
+            </el-tooltip>
+            <el-tooltip v-else-if="row.payee" :content="row.payee" placement="top" :show-after="200">
+              <span class="payee-cell" :class="{ other: row.person && row.payee !== row.person }">
+                {{ row.payee }}
+              </span>
+            </el-tooltip>
+            <span v-else class="text-muted">—</span>
           </template>
         </el-table-column>
         <el-table-column label="报销状态" width="110" align="center">
@@ -109,8 +122,8 @@
             <el-tag size="small" :type="auditType(row.audit_status)">{{ auditText(row.audit_status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="note" label="备注" min-width="100" show-overflow-tooltip />
-        <el-table-column label="操作" width="100" align="center">
+        <el-table-column prop="note" label="备注" min-width="80" show-overflow-tooltip />
+        <el-table-column label="操作" width="100" align="center" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click.stop="openInvoice(row.id)">详情</el-button>
             <el-button v-if="canDeleteRow(row)" link type="danger" size="small" @click.stop="removeRow(row)">删除</el-button>
@@ -207,6 +220,7 @@ const attachDialog = ref(false)
 const attachBatch = ref(null)
 
 const auditVisible = ref(false)
+const auditChecking = ref(false)
 const audit = reactive({ running: false, total: 0, done: 0, ok: 0, fail: 0, skip: 0, log: [] })
 let auditTimer = null
 
@@ -228,6 +242,20 @@ const auditSummary = computed(() => {
 function money(v) {
   return '¥' + Number(v || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
+/** 收款人显示：一个人就写名字，多人写"张三 等 2 人" */
+function payeeLabel(row) {
+  const names = String(row.payee_names || '').split('、').filter(Boolean)
+  if (!names.length) return row.payee || '—'
+  return names.length === 1 ? names[0] : `${names[0]} 等 ${names.length} 人`
+}
+
+/** 悬浮提示：把所有人 + 金额列出来 */
+function payeeTip(row) {
+  const names = String(row.payee_names || '').split('、').filter(Boolean)
+  if (names.length <= 1) return names[0] || ''
+  return names.join('、')
+}
+
 function auditText(s) {
   return { 0: '未查验', 1: '查验通过', 2: '查验不通过', 3: '无需查验' }[Number(s)] || '未查验'
 }
@@ -271,8 +299,10 @@ async function reload() {
 function onSelect(list) { selection.value = list }
 function clearSelection() { selection.value = [] }
 
-function onRowClick(row, col) {
+function onRowClick(row, col, ev) {
+  // 点开关、勾选框、按钮、链接时不要顺带打开详情
   if (col?.type === 'selection' || col?.label === '操作') return
+  if (ev?.target?.closest?.('button, a, input, .el-switch, .el-checkbox')) return
   openInvoice(row.id)
 }
 
@@ -335,21 +365,61 @@ function exportExcel() {
   window.open(api.exportUrl({ ...filters }), '_blank')
 }
 
-async function startAudit() {
-  try {
-    await api.auditStart(selection.value.map(r => r.id))
-    auditVisible.value = true
-    pollAudit()
-  } catch (e) {
-    ElMessage.error(e.message || '启动查验失败')
+  async function startAudit(ids) {
+    const list = ids && ids.length ? ids : selection.value.map(r => r.id)
+    if (!list.length) {
+      ElMessage.info('请先勾选要查验的发票')
+      return
+    }
+    try {
+      await api.auditStart(list)
+      auditVisible.value = true
+      pollAudit()
+    } catch (e) {
+      ElMessage.error(e.message || '启动查验失败')
+    }
   }
-}
+
+  /**
+   * 工具栏上的「查验」：
+   * 勾了就查勾中的；没勾就问一句要不要查全部「未查验 / 上次没通过」的。
+   * 旧版就是这个行为，按钮一直摆在外面。
+   */
+  async function auditClick() {
+    if (selection.value.length) {
+      return startAudit()
+    }
+    auditChecking.value = true
+    try {
+      const r = await api.list({})
+      const ids = (r.records || [])
+        .filter(x => [0, 2].includes(Number(x.audit_status || 0)))
+        .map(x => x.id)
+      if (!ids.length) {
+        ElMessage.success('没有需要查验的发票，都是查过的')
+        return
+      }
+      await ElMessageBox.confirm(
+        `没有勾选发票。要查验全部「未查验 / 上次没通过」的 ${ids.length} 张吗？`,
+        '查验哪些发票',
+        { confirmButtonText: '全部查验', cancelButtonText: '取消', type: 'info' }
+      )
+      await startAudit(ids)
+    } catch (e) {
+      if (e !== 'cancel' && e !== 'close') {
+        ElMessage.error(e.message || '启动查验失败')
+      }
+    } finally {
+      auditChecking.value = false
+    }
+  }
 
 async function pollAudit() {
   clearTimeout(auditTimer)
   try {
     const r = await api.auditStatus()
-    Object.assign(audit, r.status || r)
+    // 后端把进度放在 state 里（旧接口叫 status），两个都兼容
+    Object.assign(audit, r.state || r.status || r)
     if (audit.running) {
       auditTimer = setTimeout(pollAudit, 1200)
     } else {
@@ -374,6 +444,13 @@ onMounted(reload)
 </script>
 
 <style scoped>
+.payee-cell {
+  display: inline-block; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  vertical-align: bottom;
+}
+.payee-cell.other { color: #E6A23C; }
+
 .selbar {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 16px;

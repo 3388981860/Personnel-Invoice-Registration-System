@@ -1,0 +1,42 @@
+server:
+  port: 8765
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: invoice-server
+  datasource:
+    # 直接复用现成的 SQLite 库，路径可用 --app.base-dir 覆盖
+    url: jdbc:sqlite:${app.base-dir}/数据/发票台账.db?busy_timeout=15000
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 8
+      minimum-idle: 1
+      pool-name: invoice-pool
+  mvc:
+    problemdetails:
+      enabled: false
+
+app:
+  # 项目根目录（程序/网页/数据 所在的那层），默认是后端的上一级
+  base-dir: ..
+  # 前端构建产物目录（相对 base-dir）
+  web-dir: 前端/dist
+  # 会话有效期（天），与 Python 版保持一致
+  session-days: 7
+  # 登录失败限流
+  login-fail-limit: 5
+  login-fail-window-seconds: 300
+  # 查验小服务（Python），留空表示不启用
+  # 查验小服务（Python）
+  audit-base-url: http://127.0.0.1:8798
+  # 解析小服务（Python，工具/解析服务.py）
+  parse-base-url: http://127.0.0.1:8799
+
+logging:
+  level:
+    root: INFO
+    com.xinyu.invoice: DEBUG
