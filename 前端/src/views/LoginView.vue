@@ -16,15 +16,16 @@
           <div class="qr-title">人数行政平台</div>
           <div class="qr-sub">ADMINISTRATION PLATFORM</div>
 
-          <ul class="qr-list">
-            <li>发票登记与报销审批</li>
-            <li>合同台账与开票回款</li>
-            <li>发票查验与数据统计</li>
-          </ul>
+          <div class="qr-slogan">
+            <transition name="slogan" mode="out-in">
+              <div :key="sloganIdx" class="slogan-lines">
+                <div v-for="(line, i) in sloganLines" :key="i">{{ line }}</div>
+              </div>
+            </transition>
+          </div>
 
           <div class="qr-foot">
             <span>服务状态：{{ statusText }}</span>
-            <span>构建 {{ build }}</span>
           </div>
         </div>
       </div>
@@ -107,12 +108,12 @@
 
     </div>
 
-    <div class="login-copy">© 2026 人数行政平台 · 温州信宇科技</div>
+    <div class="login-copy">© {{ year }} 人数行政平台 · 浙江人数科技</div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
@@ -122,6 +123,20 @@ import { loadMe, state } from '../store'
 const router = useRouter()
 const route = useRoute()
 
+const year = new Date().getFullYear()
+
+/** 登录页标语，每 5 秒换一句 */
+/** 登录页标语，每句固定两行，每 5 秒换一句 */
+const slogans = [
+  ['让数据多跑路，', '让员工少跑腿。'],
+  ['数字赋能效率，', '科技驱动未来。'],
+  ['精于业，简于行，', '让每一次审批都高效流转。'],
+  ['数据创造价值，', '协同成就卓越。']
+]
+const sloganIdx = ref(0)
+
+const sloganLines = computed(() => slogans[sloganIdx.value] || [])
+let sloganTimer = null
 const mode = ref('login')
 const loading = ref(false)
 const error = ref('')
@@ -135,6 +150,11 @@ const build = ref(state.build || '—')
 const REMEMBER_KEY = 'invoice-last-user'
 
 onMounted(async () => {
+  // 标语轮播
+  sloganTimer = setInterval(() => {
+    sloganIdx.value = (sloganIdx.value + 1) % slogans.length
+  }, 5000)
+
   // 记住上次登录的用户名
   try {
     const last = localStorage.getItem(REMEMBER_KEY)
@@ -152,6 +172,10 @@ onMounted(async () => {
   } catch (e) {
     statusText.value = '连不上'
   }
+})
+
+onBeforeUnmount(() => {
+  if (sloganTimer) clearInterval(sloganTimer)
 })
 
 /** 忘了密码：系统里没有自助重置，只能找管理员 */
