@@ -88,7 +88,7 @@
         @selection-change="onSelect"
         @row-click="onRowClick"
       >
-        <el-table-column type="selection" width="46" reserve-selection />
+        <el-table-column type="selection" width="52" align="center" reserve-selection />
         <el-table-column label="报销单号" width="176">
           <template #default="{ row }">
             <el-link v-if="row.batch_id" type="primary" @click.stop="openBatch(row.batch_id)">
