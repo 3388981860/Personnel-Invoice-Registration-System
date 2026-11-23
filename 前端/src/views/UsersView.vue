@@ -40,8 +40,17 @@
             </template>
           </template>
         </el-table-column>
-        <el-table-column label="操作" min-width="260" align="right">
+        <el-table-column label="钉钉" width="130">
           <template #default="{ row }">
+            <el-tag v-if="row.dingtalk_userid" size="small" type="success" effect="plain">
+              已绑定
+            </el-tag>
+            <span v-else class="text-muted" style="font-size:12px">未绑定</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" min-width="300" align="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="openDing(row)">钉钉</el-button>
             <el-button v-if="row.role !== 'admin'" link type="primary" size="small"
                        @click="openPerm(row)">权限</el-button>
             <el-button link type="primary" size="small" @click="rename(row)">改姓名</el-button>
@@ -56,6 +65,44 @@
         </el-table-column>
       </el-table>
     </div>
+
+    <!-- 钉钉绑定 -->
+    <el-dialog v-model="dingDlg" title="钉钉账号" width="520px" append-to-body>
+      <div style="margin-bottom:10px">
+        给「<b>{{ dingUser?.display_name || dingUser?.username }}</b>」绑定钉钉账号，
+        绑定后审核、公告等消息会推到他的钉钉。
+      </div>
+
+      <el-alert v-if="dingLoadError" type="warning" :closable="false" show-icon
+                :title="dingLoadError" style="margin-bottom:12px" />
+
+      <el-select v-model="dingPick" filterable clearable placeholder="搜索姓名或手机号"
+                 style="width:100%" :loading="dingLoading">
+        <el-option v-for="m in dingMembers" :key="m.userid"
+                   :label="m.name + (m.mobile ? ' · ' + m.mobile : '')"
+                   :value="m.userid" />
+      </el-select>
+
+      <div v-if="pickedMember" class="sync-row">
+        <el-checkbox v-model="dingSyncName">
+          把系统姓名改成「{{ pickedMember.name }}」
+        </el-checkbox>
+        <span class="text-muted" style="font-size:12px">
+          （现在是「{{ dingUser?.display_name || dingUser?.username }}」）
+        </span>
+      </div>
+
+      <div class="text-muted" style="font-size:12px;margin-top:10px">
+        当前：{{ dingUser?.dingtalk_userid ? '已绑定 ' + dingUser.dingtalk_userid : '未绑定' }}
+      </div>
+
+      <template #footer>
+        <el-button v-if="dingUser?.dingtalk_userid" @click="dingUnbind">解绑</el-button>
+        <el-button @click="dingTest" :loading="dingTesting">发测试消息</el-button>
+        <el-button @click="dingDlg = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="dingSave">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 功能权限 -->
     <el-dialog v-model="permDlg" title="功能权限" width="520px" append-to-body>
@@ -110,7 +157,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { state } from '../store'
@@ -119,6 +166,79 @@ const users = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const createVisible = ref(false)
+const dingDlg = ref(false)
+const dingUser = ref(null)
+const dingPick = ref('')
+const dingMembers = ref([])
+const dingLoading = ref(false)
+const dingLoadError = ref('')
+const dingTesting = ref(false)
+const dingSyncName = ref(true)
+
+/** 下拉里选中的那个钉钉成员 */
+const pickedMember = computed(() =>
+  dingMembers.value.find(m => m.userid === dingPick.value) || null)
+
+/** 打开钉钉绑定弹窗，顺便把通讯录拉一次 */
+async function openDing(row) {
+  dingUser.value = row
+  dingPick.value = row.dingtalk_userid || ''
+  dingSyncName.value = true
+  dingDlg.value = true
+  dingLoadError.value = ''
+  dingMembers.value = []
+  dingLoading.value = true
+  try {
+    const r = await api.dingtalkStatus()
+    dingMembers.value = r.members || []
+    if (r.directory_error) dingLoadError.value = r.directory_error
+    else if (!r.configured) dingLoadError.value = '服务端还没配置钉钉密钥'
+  } catch (e) {
+    dingLoadError.value = e.message || '读取钉钉通讯录失败'
+  } finally {
+    dingLoading.value = false
+  }
+}
+
+async function dingSave() {
+  saving.value = true
+  try {
+    const m = pickedMember.value
+    await api.dingtalkBind({
+      user_id: dingUser.value.id,
+      dingtalk_userid: dingPick.value,
+      sync_name: !!m && dingSyncName.value,
+      dingtalk_name: m ? m.name : ''
+    })
+    dingUser.value.dingtalk_userid = dingPick.value || null
+    if (m && dingSyncName.value) dingUser.value.display_name = m.name
+    ElMessage.success(dingPick.value ? '已绑定' : '已解绑')
+    dingDlg.value = false
+  } catch (e) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function dingUnbind() {
+  dingPick.value = ''
+  await dingSave()
+}
+
+async function dingTest() {
+  dingTesting.value = true
+  try {
+    const r = await api.dingtalkTest({ user_id: dingUser.value.id })
+    if (r.ok) ElMessage.success('已发送，去钉钉看看')
+    else ElMessage.error(r.error || '发送失败')
+  } catch (e) {
+    ElMessage.error(e.message || '发送失败')
+  } finally {
+    dingTesting.value = false
+  }
+}
+
 const permDlg = ref(false)
 const permUser = ref(null)
 const permChecked = ref([])
@@ -217,3 +337,10 @@ function openAccount() {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.sync-row {
+  margin-top: 12px;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+</style>

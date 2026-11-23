@@ -39,8 +39,11 @@ public class AuthFilter extends OncePerRequestFilter {
         req.setAttribute("token", token);
 
         String path = req.getRequestURI();
+        // 钉钉扫码登录：拿授权地址、接收回调，这两个必须在未登录时也能访问
         boolean open = path.equals("/api/login") || path.equals("/api/register")
-                || path.equals("/api/ping") || path.equals("/_health");
+                || path.equals("/api/ping") || path.equals("/_health")
+                || path.equals("/api/dingtalk/login-url")
+                || path.equals("/api/dingtalk/callback");
 
         if (path.startsWith("/api/") && !open && user == null) {
             resp.setStatus(401);

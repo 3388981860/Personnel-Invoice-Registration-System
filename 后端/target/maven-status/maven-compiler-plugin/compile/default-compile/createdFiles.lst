@@ -8,6 +8,7 @@ com\xinyu\invoice\web\ContractController.class
 com\xinyu\invoice\InvoiceApplication.class
 com\xinyu\invoice\repo\InvoiceWriteRepo.class
 com\xinyu\invoice\web\BatchController.class
+com\xinyu\invoice\web\DingTalkLoginController.class
 com\xinyu\invoice\web\ToolController.class
 com\xinyu\invoice\service\AuditProxyService.class
 com\xinyu\invoice\auth\SessionService.class
@@ -20,15 +21,18 @@ com\xinyu\invoice\repo\ContractRepo.class
 com\xinyu\invoice\service\ExcelExportService.class
 com\xinyu\invoice\repo\BatchRepo.class
 com\xinyu\invoice\repo\InvoiceRepo.class
+com\xinyu\invoice\web\DingTalkController.class
 com\xinyu\invoice\web\ContractExportController.class
 com\xinyu\invoice\web\ContractPayController.class
 com\xinyu\invoice\auth\Perm.class
+com\xinyu\invoice\service\DingTalkService.class
 com\xinyu\invoice\web\EntryController.class
 com\xinyu\invoice\web\NotificationController.class
 com\xinyu\invoice\service\ParseService.class
 com\xinyu\invoice\web\AuditController.class
 com\xinyu\invoice\web\AuthController.class
 com\xinyu\invoice\config\SchemaMigrator.class
+com\xinyu\invoice\service\NotifyBridge.class
 com\xinyu\invoice\web\AnnouncementController.class
 com\xinyu\invoice\web\LogController.class
 com\xinyu\invoice\web\UserController.class

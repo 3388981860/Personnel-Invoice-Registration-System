@@ -35,6 +35,15 @@ app:
   audit-base-url: http://127.0.0.1:8798
   # 解析小服务（Python，工具/解析服务.py）
   parse-base-url: http://127.0.0.1:8799
+  # 钉钉（企业内部应用）；密钥走环境变量，不写在代码里
+  dingtalk:
+    app-key: ${DINGTALK_APP_KEY:}
+    app-secret: ${DINGTALK_APP_SECRET:}
+    agent-id: ${DINGTALK_AGENT_ID:}
+    # 点开钉钉消息要跳的地址（系统对外地址）
+    web-base: ${DINGTALK_WEB_BASE:}
+    # 扫码登录：回调地址要和钉钉后台「登录与分享」里配的完全一致
+    redirect-uri: ${DINGTALK_REDIRECT_URI:}
 
 logging:
   level:

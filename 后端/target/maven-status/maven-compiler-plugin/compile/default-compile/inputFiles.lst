@@ -2,11 +2,14 @@ D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\con
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\service\AuditProxyService.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\InvoiceController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\ContractStatsController.java
+D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\DingTalkController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\AuthController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\auth\PasswordTool.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\repo\InvoiceRepo.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\repo\StatsRepo.java
+D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\service\NotifyBridge.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\FileController.java
+D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\DingTalkLoginController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\InvoiceWriteController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\AssetController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\EntryController.java
@@ -21,6 +24,7 @@ D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\ContractPayController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\BaseController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\auth\SessionService.java
+D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\service\DingTalkService.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\service\ExcelExportService.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\ToolController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\repo\InvoiceWriteRepo.java

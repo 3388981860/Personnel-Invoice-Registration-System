@@ -25,6 +25,12 @@ import java.util.Map;
 @RestController
 public class AnnouncementController extends BaseController {
 
+    private final com.xinyu.invoice.service.DingTalkService dingTalk;
+
+    public AnnouncementController(com.xinyu.invoice.service.DingTalkService dingTalk) {
+        this.dingTalk = dingTalk;
+    }
+
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @GetMapping("/api/announcements")
@@ -94,10 +100,24 @@ public class AnnouncementController extends BaseController {
                     content.length() > 120 ? content.substring(0, 120) + "…" : content,
                     aid, now);
         }
+        // 顺带推到钉钉（绑定了的人才会收到）
+        List<Long> ids = new ArrayList<>();
+        for (Map<String, Object> one : users) {
+            ids.add(((Number) one.get("id")).longValue());
+        }
+        int ding = 0;
+        try {
+            ding = dingTalk.sendToUsers(ids, "公告：" + title, content, null);
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(AnnouncementController.class)
+                    .warn("公告钉钉推送失败：{}", e.getMessage());
+        }
+
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ok", true);
         out.put("id", aid);
         out.put("notified", users.size());
+        out.put("dingtalk_sent", ding);
         return out;
     }
 

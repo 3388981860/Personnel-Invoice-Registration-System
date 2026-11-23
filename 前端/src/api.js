@@ -83,6 +83,11 @@ export const api = {
   announcementDelete: (body) => post('/api/announcements/delete', body),
   announcementAck: (body) => post('/api/announcements/ack', body),
 
+  dingtalkLoginUrl: () => get('/api/dingtalk/login-url'),
+  dingtalkStatus: () => get('/api/dingtalk/status'),
+  dingtalkBind: (body) => post('/api/dingtalk/bind', body),
+  dingtalkTest: (body) => post('/api/dingtalk/test', body),
+
   tools: () => get('/api/tools'),
   toolSave: (body) => post('/api/tools/save', body),
   toolDelete: (body) => post('/api/tools/delete', body),

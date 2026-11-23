@@ -409,6 +409,20 @@ body {
 }
 .login-row .el-link { font-size: 13px; }
 
+.ding-wrap { margin-top: 14px; }
+.ding-split {
+  display: flex; align-items: center; gap: 10px;
+  color: #B0B8C4; font-size: 12px; margin: 4px 0 12px;
+}
+.ding-split::before, .ding-split::after {
+  content: ''; flex: 1; height: 1px; background: #EEF1F5;
+}
+.ding-btn {
+  width: 100%; height: 42px; border-radius: 6px;
+  border-color: #C9D6E8; color: #1B4F8C; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.ding-btn:hover { border-color: #1B4F8C; background: #F5F9FF; }
 .login-btn {
   width: 100%; height: 44px; letter-spacing: 4px;
   border-radius: 6px; font-size: 15px;

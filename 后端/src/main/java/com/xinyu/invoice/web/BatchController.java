@@ -19,12 +19,16 @@ public class BatchController extends BaseController {
     private final StatsRepo statsRepo;
     private final com.xinyu.invoice.repo.PayeeRepo payees;
 
+    private final com.xinyu.invoice.service.NotifyBridge notifyBridge;
+
     public BatchController(BatchQueryRepo query, BatchRepo writer, StatsRepo statsRepo,
-                           com.xinyu.invoice.repo.PayeeRepo payees) {
+                           com.xinyu.invoice.repo.PayeeRepo payees,
+                           com.xinyu.invoice.service.NotifyBridge notifyBridge) {
         this.query = query;
         this.writer = writer;
         this.statsRepo = statsRepo;
         this.payees = payees;
+        this.notifyBridge = notifyBridge;
     }
 
     // ---------------------------------------------------------------- 列表 / 详情
@@ -93,9 +97,14 @@ public class BatchController extends BaseController {
                 // 退回只通知提交人，管理员自己就是审核人，不用再收一遍
                 notifyOne(ownerId, "return", "单据 " + after.get("batch_no") + " 被退回",
                         "审核意见" + (note.isEmpty() ? "：请查看后退回修改" : "：" + note), bid);
+                notifyBridge.push(List.of(ownerId), "单据被退回",
+                        "单据 " + after.get("batch_no") + " 被退回"
+                                + (note.isEmpty() ? "，请查看后修改" : "：" + note), "/ledger");
             } else {
                 notifyOne(ownerId, "approve", "单据 " + after.get("batch_no") + " 已通过",
                         "审核通过，可以报销了", bid);
+                notifyBridge.push(List.of(ownerId), "审核已通过",
+                        "单据 " + after.get("batch_no") + " 审核通过，可以报销了", "/ledger");
             }
         }
         writer.log(uid(admin), str(admin.get("username")),
@@ -104,6 +113,21 @@ public class BatchController extends BaseController {
 
         return Map.of("ok", true, "batch", after,
                 "stats", statsRepo.stats(null));
+    }
+
+    /** 给所有管理员推钉钉 */
+    private void pushAdminsDing(String text) {
+        try {
+            java.util.List<Long> ids = new java.util.ArrayList<>();
+            for (Map<String, Object> a : jdbc.queryForList(
+                    "SELECT id FROM users WHERE role = 'admin' AND status = 1")) {
+                ids.add(((Number) a.get("id")).longValue());
+            }
+            notifyBridge.push(ids, "报销单有新动向", text, "/pending");
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(BatchController.class)
+                    .warn("钉钉推送失败：{}", e.getMessage());
+        }
     }
 
     // ---------------------------------------------------------------- 重新提交
@@ -122,6 +146,8 @@ public class BatchController extends BaseController {
         writer.notifyAdmins("submit", "单据 " + after.get("batch_no") + " 重新提交",
                 str(u.getOrDefault("display_name", u.get("username"))) + " 修改后重新提交，请审核",
                 bid);
+        pushAdminsDing(str(u.getOrDefault("display_name", u.get("username")))
+                + " 重新提交了单据 " + after.get("batch_no") + "，请审核");
         writer.log(uid(u), str(u.get("username")), "resubmit", "batch", bid,
                 String.valueOf(after.get("batch_no")));
 

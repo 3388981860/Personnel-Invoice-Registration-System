@@ -103,6 +103,16 @@
               {{ mode === 'login' ? '登 录' : '注 册 并 登 录' }}
             </el-button>
           </el-form>
+
+          <div v-if="mode === 'login'" class="ding-wrap">
+            <div class="ding-split"><span>或</span></div>
+            <el-button class="ding-btn" size="large" :loading="dingLoading" @click="loginByDingTalk">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+                <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm5.2 7.1-3.7 4.3c-.6.7-1.4 1.1-2.3 1.1-.5 0-.9-.1-1.3-.4-.4-.2-.6-.6-.6-1 0-.3.2-.6.5-.9l.6-.6-2.9-.7c-.4-.1-.6-.5-.4-.9.1-.3.4-.5.7-.5l4.9.6-1.4 1.5c-.2.2-.2.4 0 .5.1.1.3.1.4 0l3.4-2.6c.4-.3 1-.3 1.4 0 .4.3.5.9.2 1.3z"/>
+              </svg>
+              钉钉登录
+            </el-button>
+          </div>
         </div>
       </div>
 
@@ -144,12 +154,31 @@ const formRef = ref(null)
 
 const form = reactive({ username: '', password: '', password2: '', display_name: '' })
 const remember = ref(true)
+const dingLoading = ref(false)
+
+/** 跳钉钉授权页 */
+async function loginByDingTalk() {
+  dingLoading.value = true
+  try {
+    const r = await api.dingtalkLoginUrl()
+    window.location.href = r.url
+  } catch (e) {
+    ElMessage.error(e.message || '钉钉登录不可用')
+    dingLoading.value = false
+  }
+}
+
 const statusText = ref('检测中…')
 const build = ref(state.build || '—')
 
 const REMEMBER_KEY = 'invoice-last-user'
 
 onMounted(async () => {
+  // 钉钉登录失败时，后端会带 ding_error 回到这里
+  if (route.query.ding_error) {
+    error.value = String(route.query.ding_error)
+  }
+
   // 标语轮播
   sloganTimer = setInterval(() => {
     sloganIdx.value = (sloganIdx.value + 1) % slogans.length

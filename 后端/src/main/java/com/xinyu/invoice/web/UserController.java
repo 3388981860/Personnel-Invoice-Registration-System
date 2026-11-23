@@ -33,7 +33,8 @@ public class UserController extends BaseController {
             one.put("status", u.get("status") == null ? 0 : ((Number) u.get("status")).intValue());
             one.put("created_at", u.get("created_at"));
             one.put("last_login_at", u.get("last_login_at"));
-            one.put("perms", com.xinyu.invoice.auth.Perm.of(u));
+one.put("perms", com.xinyu.invoice.auth.Perm.of(u));
+            one.put("dingtalk_userid", u.get("dingtalk_userid"));
             one.put("perms_custom", u.get("perms") != null
                     && !String.valueOf(u.get("perms")).isBlank());
             users.add(one);

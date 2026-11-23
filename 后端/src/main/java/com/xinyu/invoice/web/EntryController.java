@@ -26,6 +26,8 @@ import java.util.*;
 public class EntryController extends BaseController {
 
     private static final Logger log = LoggerFactory.getLogger(EntryController.class);
+
+    private final com.xinyu.invoice.service.NotifyBridge notifyBridge;
     private static final Set<String> EXT = Set.of(".pdf", ".ofd");
 
     private final ParseService parser;
@@ -37,13 +39,15 @@ public class EntryController extends BaseController {
 
     public EntryController(ParseService parser, BatchRepo batches, StatsRepo statsRepo,
                            com.xinyu.invoice.repo.PayeeRepo payees,
-                           InvoiceRepo invoices, AppProps props) {
+                           InvoiceRepo invoices, AppProps props,
+                           com.xinyu.invoice.service.NotifyBridge notifyBridge) {
         this.parser = parser;
         this.batches = batches;
         this.statsRepo = statsRepo;
         this.invoices = invoices;
         this.props = props;
         this.payees = payees;
+        this.notifyBridge = notifyBridge;
     }
 
     // ---------------------------------------------------------------- 上传识别
@@ -192,6 +196,18 @@ public class EntryController extends BaseController {
                 str(u.get("display_name")) + " 提交了 " + ids.size() + " 张发票（收款 "
                         + payeeList.size() + " 人），等待审核",
                 bid);
+            try {
+                java.util.List<Long> adminIds = new java.util.ArrayList<>();
+                for (Map<String, Object> a : jdbc.queryForList(
+                        "SELECT id FROM users WHERE role = 'admin' AND status = 1")) {
+                    adminIds.add(((Number) a.get("id")).longValue());
+                }
+                notifyBridge.push(adminIds, "有新的报销单待审核",
+                        str(u.get("display_name")) + " 提交了 " + ids.size()
+                                + " 张发票（" + finalNo + "），请审核", "/pending");
+            } catch (Exception e) {
+                log.warn("钉钉推送失败：{}", e.getMessage());
+            }
         batches.log(ownerId, str(u.get("username")), "submit_batch", "batch", bid,
                 finalNo + "｜" + ids.size() + " 张");
 
