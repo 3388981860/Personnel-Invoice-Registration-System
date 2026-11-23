@@ -159,8 +159,14 @@ public class EntryController extends BaseController {
         }
         com.xinyu.invoice.repo.PayeeRepo.requireMatches(invoiceTotal, payeeList);
 
+        // 报销部门 / 项目（来自数据字典，可留空）
+        String deptName = str(body.get("dept_name")).strip();
+        String projectName = str(body.get("project_name")).strip();
+
         long bid = batches.createBatch(batchNo.isEmpty() ? null : batchNo,
-                note.isEmpty() ? null : note, ownerId, "submitted");
+                note.isEmpty() ? null : note, ownerId, "submitted",
+                deptName.isEmpty() ? null : deptName,
+                projectName.isEmpty() ? null : projectName);
 
         List<Long> ids = new ArrayList<>();
         try {

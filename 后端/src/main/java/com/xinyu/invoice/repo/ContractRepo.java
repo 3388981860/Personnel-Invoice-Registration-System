@@ -42,6 +42,13 @@ public class ContractRepo {
                 """);
     }
 
+    /** 取单个项目集 */
+    public Map<String, Object> projectSet(long id) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT * FROM project_sets WHERE id = ?", id);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     /** 保存项目集（没有 id 就新建，编号 JC-年份-序号） */
     public long saveProjectSet(Map<String, Object> b) {
         String name = str(b.get("name")).strip();
@@ -89,6 +96,8 @@ public class ContractRepo {
                 SELECT p.*,
                   (SELECT COALESCE(NULLIF(u.display_name,''), u.username) FROM users u
                     WHERE u.id = p.owner_id) AS owner_name,
+                  (SELECT s.name FROM project_sets s WHERE s.id = p.set_id) AS set_name,
+                  (SELECT s.code FROM project_sets s WHERE s.id = p.set_id) AS set_code,
                   (SELECT COUNT(*) FROM contracts c WHERE c.project_id = p.id) AS contract_count,
                   COALESCE((SELECT SUM(c.amount) FROM contracts c
                             WHERE c.project_id = p.id AND c.kind = 'income'), 0) AS income_amount,
@@ -103,11 +112,22 @@ public class ContractRepo {
                             WHERE c.project_id = p.id AND c.kind = 'income'
                               AND b.kind = 'payment'), 0) AS received
                 FROM projects p
-                """ + (ownerId != null ? " WHERE p.owner_id = ?" : "")
+                """
+                + ((ownerId != null || setId != null) ? " WHERE " : "")
+                + (ownerId != null ? " p.owner_id = ?" : "")
+                + ((ownerId != null && setId != null) ? " AND " : "")
+                + (setId != null ? " p.set_id = ?" : "")
                 + " ORDER BY p.id DESC";
-        List<Map<String, Object>> rows = ownerId != null
-                ? jdbc.queryForList(sql, ownerId)
-                : jdbc.queryForList(sql);
+        java.util.List<Object> args = new java.util.ArrayList<>();
+        if (ownerId != null) {
+            args.add(ownerId);
+        }
+        if (setId != null) {
+            args.add(setId);
+        }
+        List<Map<String, Object>> rows = args.isEmpty()
+                ? jdbc.queryForList(sql)
+                : jdbc.queryForList(sql, args.toArray());
         for (Map<String, Object> r : rows) {
             r.put("invoiced", round(num(r.get("invoiced"))));
             r.put("received", round(num(r.get("received"))));

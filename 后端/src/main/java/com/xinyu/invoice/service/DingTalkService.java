@@ -156,6 +156,148 @@ public class DingTalkService {
         return new ArrayList<>(uniq.values());
     }
 
+    /** 部门树节点：dept_id / name / parent_id */
+    public java.util.List<Map<String, Object>> deptTree() {
+        String tok = accessToken();
+        java.util.List<Map<String, Object>> out = new ArrayList<>();
+        java.util.List<Long> queue = new ArrayList<>();
+        java.util.List<Long> parents = new ArrayList<>();
+        queue.add(1L);
+        parents.add(0L);
+        int guard = 0;
+        while (!queue.isEmpty() && guard++ < 200) {
+            long parent = queue.remove(0);
+            long grand = parents.remove(0);
+            JsonNode sub = postJson("https://oapi.dingtalk.com/topapi/v2/department/listsub?access_token=" + tok,
+                    Map.of("dept_id", parent, "language", "zh_CN"));
+            for (JsonNode d : sub.path("result")) {
+                long id = d.path("dept_id").asLong();
+                Map<String, Object> one = new LinkedHashMap<>();
+                one.put("dept_id", id);
+                one.put("name", d.path("name").asText(""));
+                one.put("parent_id", parent == 1L ? 0L : parent);
+                out.add(one);
+                queue.add(id);
+                parents.add(parent);
+            }
+        }
+        return out;
+    }
+
+    /** userid → 所属部门 ID 列表 */
+    public Map<String, java.util.List<Long>> deptIdsByUser() {
+        String tok = accessToken();
+        Map<String, java.util.List<Long>> out = new LinkedHashMap<>();
+        java.util.List<Long> depts = new ArrayList<>();
+        depts.add(1L);
+        JsonNode sub = postJson("https://oapi.dingtalk.com/topapi/v2/department/listsub?access_token=" + tok,
+                Map.of("dept_id", 1, "language", "zh_CN"));
+        for (JsonNode d : sub.path("result")) {
+            long id = d.path("dept_id").asLong();
+            depts.add(id);
+            JsonNode sub2 = postJson("https://oapi.dingtalk.com/topapi/v2/department/listsub?access_token=" + tok,
+                    Map.of("dept_id", id, "language", "zh_CN"));
+            for (JsonNode d2 : sub2.path("result")) {
+                depts.add(d2.path("dept_id").asLong());
+            }
+        }
+        for (Long deptId : depts) {
+            long cursor = 0;
+            while (true) {
+                JsonNode r = postJson("https://oapi.dingtalk.com/topapi/v2/user/list?access_token=" + tok,
+                        Map.of("dept_id", deptId, "cursor", cursor, "size", 50, "language", "zh_CN"));
+                JsonNode result = r.path("result");
+                for (JsonNode u : result.path("list")) {
+                    String uid = u.path("userid").asText("");
+                    if (uid.isEmpty() || deptId == 1L) {
+                        continue;
+                    }
+                    out.computeIfAbsent(uid, k -> new ArrayList<>()).add(deptId);
+                }
+                if (!result.path("has_more").asBoolean(false)) {
+                    break;
+                }
+                cursor = result.path("next_cursor").asLong(0);
+            }
+        }
+        return out;
+    }
+
+    /** 钉钉部门树里的所有部门名（按层级展开，不含根组织） */
+    public java.util.List<String> deptNames() {
+        String tok = accessToken();
+        java.util.List<String> out = new ArrayList<>();
+        java.util.List<Long> queue = new ArrayList<>();
+        queue.add(1L);
+        int guard = 0;
+        while (!queue.isEmpty() && guard++ < 200) {
+            long parent = queue.remove(0);
+            JsonNode sub = postJson("https://oapi.dingtalk.com/topapi/v2/department/listsub?access_token=" + tok,
+                    Map.of("dept_id", parent, "language", "zh_CN"));
+            for (JsonNode d : sub.path("result")) {
+                String name = d.path("name").asText("");
+                if (!name.isEmpty()) {
+                    out.add(name);
+                }
+                queue.add(d.path("dept_id").asLong());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 每个人在哪些部门（userid → 部门名列表）。
+     *
+     * 通讯录是按部门拉成员的，所以反过来遍历一遍就知道谁属于哪些部门。
+     */
+    public Map<String, java.util.List<String>> deptMapByUser() {
+        String tok = accessToken();
+        Map<Long, String> deptNames = new LinkedHashMap<>();
+        deptNames.put(1L, "根组织");
+        java.util.List<Long> depts = new ArrayList<>();
+        depts.add(1L);
+        JsonNode sub = postJson("https://oapi.dingtalk.com/topapi/v2/department/listsub?access_token=" + tok,
+                Map.of("dept_id", 1, "language", "zh_CN"));
+        for (JsonNode d : sub.path("result")) {
+            long id = d.path("dept_id").asLong();
+            depts.add(id);
+            deptNames.put(id, d.path("name").asText(""));
+            // 二级部门
+            JsonNode sub2 = postJson("https://oapi.dingtalk.com/topapi/v2/department/listsub?access_token=" + tok,
+                    Map.of("dept_id", id, "language", "zh_CN"));
+            for (JsonNode d2 : sub2.path("result")) {
+                depts.add(d2.path("dept_id").asLong());
+                deptNames.put(d2.path("dept_id").asLong(), d2.path("name").asText(""));
+            }
+        }
+
+        Map<String, java.util.List<String>> out = new LinkedHashMap<>();
+        for (Long deptId : depts) {
+            if (deptId == 1L) {
+                continue;                      // 根组织不算部门
+            }
+            long cursor = 0;
+            while (true) {
+                JsonNode r = postJson("https://oapi.dingtalk.com/topapi/v2/user/list?access_token=" + tok,
+                        Map.of("dept_id", deptId, "cursor", cursor, "size", 50, "language", "zh_CN"));
+                JsonNode result = r.path("result");
+                for (JsonNode u : result.path("list")) {
+                    String uid = u.path("userid").asText("");
+                    if (uid.isEmpty()) {
+                        continue;
+                    }
+                    out.computeIfAbsent(uid, k -> new ArrayList<>())
+                            .add(deptNames.getOrDefault(deptId, ""));
+                }
+                if (!result.path("has_more").asBoolean(false)) {
+                    break;
+                }
+                cursor = result.path("next_cursor").asLong(0);
+            }
+        }
+        return out;
+    }
+
     /** 按手机号查钉钉 userid，查不到返回 null */
     public String userIdByMobile(String mobile) {
         if (mobile == null || mobile.isBlank()) {

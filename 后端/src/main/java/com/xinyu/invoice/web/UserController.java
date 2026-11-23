@@ -14,7 +14,117 @@ import java.util.*;
 @RestController
 public class UserController extends BaseController {
 
+    private final com.xinyu.invoice.service.DingTalkService dingTalk;
+
+    public UserController(com.xinyu.invoice.service.DingTalkService dingTalk) {
+        this.dingTalk = dingTalk;
+    }
+
+
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    /** 从钉钉通讯录同步所有人的部门 */
+    @PostMapping("/api/users/sync-dept")
+    public Map<String, Object> syncDept(HttpServletRequest req) {
+        requireAdmin(req);
+        try {
+            java.util.Map<String, java.util.List<String>> names = dingTalk.deptMapByUser();
+            java.util.Map<String, java.util.List<Long>> ids = dingTalk.deptIdsByUser();
+            int n = 0;
+            for (Map<String, Object> u : jdbc.queryForList(
+                    "SELECT id, dingtalk_userid FROM users WHERE dingtalk_userid IS NOT NULL")) {
+                String dtId = String.valueOf(u.get("dingtalk_userid"));
+                java.util.List<String> depts = names.get(dtId);
+                if (depts == null || depts.isEmpty()) {
+                    continue;
+                }
+                java.util.List<Long> deptIds = ids.get(dtId);
+                String idStr = "";
+                if (deptIds != null && !deptIds.isEmpty()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (Long d : deptIds) {
+                        if (sb.length() > 0) {
+                            sb.append(",");
+                        }
+                        sb.append(d);
+                    }
+                    idStr = sb.toString();
+                }
+                jdbc.update("UPDATE users SET dept_name = ?, dept_ids = ? WHERE id = ?",
+                        String.join("、", depts), idStr, u.get("id"));
+                n++;
+            }
+            return Map.of("ok", true, "updated", n, "total_dt", names.size());
+        } catch (Exception e) {
+            throw new ApiException("同步部门失败：" + e.getMessage(), 500);
+        }
+    }
+
+    /** 组织架构树（钉钉部门 + 每个部门有多少人） */
+    @GetMapping("/api/users/org")
+    public Map<String, Object> org(HttpServletRequest req) {
+        requireAdmin(req);
+        java.util.List<Map<String, Object>> flat;
+        try {
+            flat = dingTalk.deptTree();
+        } catch (Exception e) {
+            flat = new java.util.ArrayList<>();
+        }
+
+        // 每个人属于哪些部门（用 dept_ids，逗号分隔）
+        java.util.List<Map<String, Object>> users = jdbc.queryForList(
+                "SELECT id, dept_ids FROM users");
+        java.util.Map<Long, Integer> counts = new java.util.HashMap<>();
+        int noDept = 0;
+        for (Map<String, Object> u : users) {
+            String ids = u.get("dept_ids") == null ? "" : String.valueOf(u.get("dept_ids"));
+            if (ids.isBlank()) {
+                noDept++;
+                continue;
+            }
+            for (String s : ids.split(",")) {
+                try {
+                    long d = Long.parseLong(s.trim());
+                    counts.merge(d, 1, Integer::sum);
+                } catch (NumberFormatException ignored) {
+                    // 脏数据跳过
+                }
+            }
+        }
+
+        // 拼成树
+        java.util.Map<Long, Map<String, Object>> byId = new java.util.LinkedHashMap<>();
+        for (Map<String, Object> d : flat) {
+            long id = ((Number) d.get("dept_id")).longValue();
+            Map<String, Object> node = new java.util.LinkedHashMap<>();
+            node.put("id", id);
+            node.put("name", d.get("name"));
+            node.put("parent_id", ((Number) d.get("parent_id")).longValue());
+            node.put("count", counts.getOrDefault(id, 0));
+            node.put("children", new java.util.ArrayList<Map<String, Object>>());
+            byId.put(id, node);
+        }
+        java.util.List<Map<String, Object>> roots = new java.util.ArrayList<>();
+        for (Map<String, Object> node : byId.values()) {
+            long parent = ((Number) node.get("parent_id")).longValue();
+            Map<String, Object> p = parent == 0 ? null : byId.get(parent);
+            if (p == null) {
+                roots.add(node);
+            } else {
+                @SuppressWarnings("unchecked")
+                java.util.List<Map<String, Object>> kids =
+                        (java.util.List<Map<String, Object>>) p.get("children");
+                kids.add(node);
+            }
+        }
+
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("ok", true);
+        out.put("total", users.size());
+        out.put("no_dept", noDept);
+        out.put("tree", roots);
+        return out;
+    }
 
     @GetMapping("/api/users")
     public Map<String, Object> list(HttpServletRequest req) {
@@ -35,6 +145,9 @@ public class UserController extends BaseController {
             one.put("last_login_at", u.get("last_login_at"));
 one.put("perms", com.xinyu.invoice.auth.Perm.of(u));
             one.put("dingtalk_userid", u.get("dingtalk_userid"));
+            one.put("dept_name", u.get("dept_name"));
+            one.put("dept_ids", u.get("dept_ids"));
+            one.put("dingtalk_title", u.get("dingtalk_title"));
             one.put("perms_custom", u.get("perms") != null
                     && !String.valueOf(u.get("perms")).isBlank());
             users.add(one);

@@ -86,6 +86,45 @@ public class ContractStatsController extends BaseController {
             watch.add(one);
         }
         out.put("watch", watch);
+
+        // 按项目集汇总：一个集一行，看这批的规模、开票、回款
+        List<Map<String, Object>> bySet = new ArrayList<>();
+        for (Map<String, Object> r : jdbc.queryForList("""
+                SELECT s.id, s.code, s.name,
+                       (SELECT COUNT(*) FROM projects p WHERE p.set_id = s.id) AS projects,
+                       (SELECT COUNT(*) FROM contracts c JOIN projects p ON p.id = c.project_id
+                         WHERE p.set_id = s.id) AS contracts,
+                       COALESCE((SELECT SUM(c.amount) FROM contracts c
+                                 JOIN projects p ON p.id = c.project_id
+                                 WHERE p.set_id = s.id AND c.kind = 'income'), 0) AS income,
+                       COALESCE((SELECT SUM(b.amount) FROM contract_billings b
+                                 JOIN contracts c ON c.id = b.contract_id
+                                 JOIN projects p ON p.id = c.project_id
+                                 WHERE p.set_id = s.id AND c.kind = 'income'
+                                   AND b.kind = 'invoice'), 0) AS invoiced,
+                       COALESCE((SELECT SUM(b.amount) FROM contract_billings b
+                                 JOIN contracts c ON c.id = b.contract_id
+                                 JOIN projects p ON p.id = c.project_id
+                                 WHERE p.set_id = s.id AND c.kind = 'income'
+                                   AND b.kind = 'payment'), 0) AS received,
+                       COALESCE((SELECT SUM(c.amount) FROM contracts c
+                                 JOIN projects p ON p.id = c.project_id
+                                 WHERE p.set_id = s.id AND c.kind = 'cost'), 0) AS cost
+                FROM project_sets s
+                ORDER BY s.year DESC, s.id DESC
+                """)) {
+            Map<String, Object> one = new LinkedHashMap<>(r);
+            double inc = ((Number) r.get("income")).doubleValue();
+            double rec = ((Number) r.get("received")).doubleValue();
+            one.put("income", ContractRepo.round(inc));
+            one.put("invoiced", ContractRepo.round(((Number) r.get("invoiced")).doubleValue()));
+            one.put("received", ContractRepo.round(rec));
+            one.put("cost", ContractRepo.round(((Number) r.get("cost")).doubleValue()));
+            one.put("remain", ContractRepo.round(Math.max(0, inc - rec)));
+            one.put("paid_ratio", inc > 0 ? Math.round(rec * 100 / inc) : 0);
+            bySet.add(one);
+        }
+        out.put("by_set", bySet);
         return out;
     }
 

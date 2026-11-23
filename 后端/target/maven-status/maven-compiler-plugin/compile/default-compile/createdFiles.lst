@@ -27,6 +27,7 @@ com\xinyu\invoice\web\ExportController.class
 com\xinyu\invoice\repo\StatsRepo.class
 com\xinyu\invoice\web\BaseController.class
 com\xinyu\invoice\web\SpaController.class
+com\xinyu\invoice\web\DictController.class
 com\xinyu\invoice\repo\InvoiceWriteRepo.class
 com\xinyu\invoice\web\BatchController.class
 com\xinyu\invoice\web\DingTalkLoginController.class

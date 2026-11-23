@@ -1,69 +1,115 @@
 <template>
   <div>
-    <div class="panel">
-      <div class="panel-hd">
-        <span>用户管理</span>
-        <span class="sub">共 {{ users.length }} 个账号</span>
-        <el-button type="primary" size="small" style="margin-left:auto" @click="openCreate">+ 新建用户</el-button>
+    <div class="org-wrap">
+      <div class="panel org-tree">
+        <div class="panel-hd"><span>组织架构</span></div>
+        <div class="tree-box">
+          <el-tree
+            :data="treeData"
+            :props="{ label: 'name', children: 'children' }"
+            node-key="id"
+            highlight-current
+            default-expand-all
+            :expand-on-click-node="false"
+            @node-click="onNodeClick"
+          >
+            <template #default="{ data }">
+              <span class="tree-node">
+                <span class="tree-name">{{ data.name }}</span>
+                <span v-if="data.count" class="tree-count">{{ data.count }}</span>
+              </span>
+            </template>
+          </el-tree>
+        </div>
       </div>
 
-      <el-table v-loading="loading" :data="users" size="small" style="width:100%">
-        <el-table-column label="用户名" width="180">
+      <div class="panel org-main">
+      <div class="panel-hd">
+        <span>{{ currentDeptName }}人员</span>
+        <span class="sub">共 {{ shownUsers.length }} 个账号</span>
+        <el-input
+          v-model="kw" size="small" clearable
+          placeholder="搜姓名 / 用户名 / 部门"
+          style="width:220px;margin-left:auto"
+          :prefix-icon="Search"
+        />
+        <el-button size="small" :loading="syncing" @click="syncDept">
+          同步部门
+        </el-button>
+        <el-button type="primary" size="small" @click="openCreate">+ 新建用户</el-button>
+      </div>
+
+      <div class="table-scroll">
+        <el-table :key="colKey" v-loading="loading" :data="shownUsers"
+                  size="small" style="width:100%">
+        <el-table-column label="用户名" :width="cw.user">
           <template #default="{ row }">
             <span class="mono">{{ row.username }}</span>
             <el-tag v-if="row.id === state.me?.id" size="small" style="margin-left:6px">我</el-tag>
+            <span v-if="row.dingtalk_userid" class="binding-dot" title="已绑定钉钉">钉</span>
           </template>
         </el-table-column>
-        <el-table-column prop="display_name" label="姓名" width="150" />
-        <el-table-column label="角色" width="120">
+        <el-table-column prop="display_name" label="姓名" :width="cw.name" />
+        <el-table-column label="角色" :width="cw.role">
           <template #default="{ row }">
             <el-tag size="small" :type="row.role === 'admin' ? 'primary' : 'info'">
               {{ row.role === 'admin' ? '管理员' : '用户' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" :width="cw.status">
           <template #default="{ row }">
             <el-tag size="small" :type="row.status ? 'success' : 'danger'">{{ row.status ? '启用' : '停用' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="最近登录" width="160">
-          <template #default="{ row }">{{ row.last_login_at || '从未登录' }}</template>
-        </el-table-column>
-        <el-table-column label="功能权限" min-width="220">
+        
+        <el-table-column v-if="showPermCol" label="功能权限" :width="cw.perm">
           <template #default="{ row }">
             <el-tag v-if="row.role === 'admin'" size="small" type="success">全部</el-tag>
-            <template v-else>
-              <el-tag v-for="k in row.perms || []" :key="k" size="small"
-                      style="margin:2px 4px 2px 0">{{ permName(k) }}</el-tag>
-              <span v-if="!(row.perms || []).length" class="text-muted">无</span>
-            </template>
+            <el-tooltip v-else-if="(row.perms || []).length" placement="top">
+              <template #content>
+                <div style="max-width:240px;line-height:1.7">
+                  {{ (row.perms || []).map(permName).join('、') }}
+                </div>
+              </template>
+              <el-tag size="small" effect="plain">{{ (row.perms || []).length }} 项</el-tag>
+            </el-tooltip>
+            <span v-else class="text-muted" style="font-size:12px">无</span>
           </template>
         </el-table-column>
-        <el-table-column label="钉钉" width="130">
+        <el-table-column v-if="showLoginCol" label="最近登录" :width="cw.login">
           <template #default="{ row }">
-            <el-tag v-if="row.dingtalk_userid" size="small" type="success" effect="plain">
-              已绑定
-            </el-tag>
-            <span v-else class="text-muted" style="font-size:12px">未绑定</span>
+            <span :class="{ 'text-muted': !row.last_login_at }">
+              {{ row.last_login_at || '从未登录' }}
+            </span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" min-width="300" align="right">
+        <el-table-column v-if="showDeptCol" prop="dept_name" label="部门" :min-width="cw.dept" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openDing(row)">钉钉</el-button>
-            <el-button v-if="row.role !== 'admin'" link type="primary" size="small"
-                       @click="openPerm(row)">权限</el-button>
-            <el-button link type="primary" size="small" @click="rename(row)">改姓名</el-button>
-            <el-button v-if="row.id !== state.me?.id" link type="primary" size="small" @click="toggleRole(row)">
-              {{ row.role === 'admin' ? '设为用户' : '设为管理员' }}
-            </el-button>
-            <el-button v-if="row.id !== state.me?.id" link size="small" @click="toggleStatus(row)">
-              {{ row.status ? '停用' : '启用' }}
-            </el-button>
+            <span :class="{ 'text-muted': !row.dept_name }">{{ row.dept_name || '—' }}</span>
+          </template>
+        </el-table-column>
+        
+        <el-table-column label="操作" :width="cw.op" align="center">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="openDing(row)">钉钉</el-button>
+              <el-button v-if="row.role !== 'admin'" link type="primary" size="small"
+                         @click="openPerm(row)">权限</el-button>
+              <el-button link type="primary" size="small" @click="rename(row)">改姓名</el-button>
+              <template v-if="row.id !== state.me?.id">
+                <el-button link type="primary" size="small" @click="toggleRole(row)">
+                  {{ row.role === 'admin' ? '设为用户' : '设为管理员' }}
+                </el-button>
+                <el-button link size="small" @click="toggleStatus(row)">
+                  {{ row.status ? '停用' : '启用' }}
+                </el-button>
+              </template>
               <el-button v-else link type="primary" size="small" @click="openAccount">改密码</el-button>
-          </template>
-        </el-table-column>
+            </template>
+          </el-table-column>
       </el-table>
+        </div>
+      </div>
     </div>
 
     <!-- 钉钉绑定 -->
@@ -157,7 +203,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { Search, ArrowDown } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { state } from '../store'
@@ -267,6 +314,122 @@ async function savePerm() {
   }
 }
 
+const syncing = ref(false)
+const treeData = ref([])
+const currentDeptId = ref('all')
+const currentDeptName = ref('全部')
+
+async function loadOrg() {
+  try {
+    const r = await api.userOrg()
+    const all = { id: 'all', name: '全部人员', count: r.total || 0, children: [] }
+    const noDept = { id: 'none', name: '未分配部门', count: r.no_dept || 0, children: [] }
+    treeData.value = [all, ...(r.tree || []), noDept]
+  } catch (e) {
+    treeData.value = [{ id: 'all', name: '全部人员', count: 0, children: [] }]
+  }
+}
+
+function onNodeClick(data) {
+  currentDeptId.value = data.id
+  currentDeptName.value = data.name
+}
+
+function collectIds(node) {
+  const ids = []
+  const walk = n => {
+    if (typeof n.id === 'number') ids.push(n.id)
+    ;(n.children || []).forEach(walk)
+  }
+  walk(node)
+  return ids
+}
+
+function findNode(nodes, id) {
+  for (const n of nodes) {
+    if (n.id === id) return n
+    const hit = findNode(n.children || [], id)
+    if (hit) return hit
+  }
+  return null
+}
+
+function inCurrentDept(u) {
+  if (currentDeptId.value === 'all') return true
+  const ids = String(u.dept_ids || '')
+  if (currentDeptId.value === 'none') return !ids.trim()
+  const node = findNode(treeData.value, currentDeptId.value)
+  if (!node) return true
+  const want = collectIds(node)
+  const mine = ids.split(',').map(s => Number(s.trim())).filter(Boolean)
+  return mine.some(x => want.includes(x))
+}
+
+const kw = ref('')
+
+/** 窗口宽度：窄了就把次要列收起来 */
+const vw = ref(typeof window === 'undefined' ? 1600 : window.innerWidth)
+/** 按窗口分四档：窄了自动收列、缩列宽 */
+const tier = computed(() => {
+  const w = vw.value
+  if (w >= 1750) return 'xl'
+  if (w >= 1500) return 'lg'
+  if (w >= 1300) return 'md'
+  return 'sm'
+})
+
+const COL_W = {
+  xl: { user: 150, name: 110, role: 86, status: 76, perm: 120, login: 158, dept: 230, op: 300 },
+  lg: { user: 130, name: 95, role: 76, status: 66, perm: 110, login: 0, dept: 200, op: 280 },
+  md: { user: 120, name: 80, role: 66, status: 60, perm: 0, login: 0, dept: 170, op: 260 },
+  sm: { user: 110, name: 70, role: 58, status: 56, perm: 0, login: 0, dept: 0, op: 250 }
+}
+const cw = computed(() => COL_W[tier.value])
+
+const showLoginCol = computed(() => tier.value === 'xl')
+const showPermCol = computed(() => ['xl', 'lg'].includes(tier.value))
+const showDeptCol = computed(() => tier.value !== 'sm')
+const colKey = computed(() => tier.value)
+
+function onResize() {
+  vw.value = window.innerWidth
+}
+
+/** 当前部门 + 关键词一起过滤 */
+const shownUsers = computed(() => {
+  const k = kw.value.trim().toLowerCase()
+  return users.value.filter(u => {
+    if (!inCurrentDept(u)) return false
+    if (!k) return true
+    return String(u.display_name || '').toLowerCase().includes(k)
+      || String(u.username || '').toLowerCase().includes(k)
+      || String(u.dept_name || '').toLowerCase().includes(k)
+  })
+})
+
+/** 从钉钉通讯录把每个人的部门拉过来 */
+/** 「更多」菜单的命令分发 */
+function onUserCmd(cmd, row) {
+  if (cmd === 'rename') return rename(row)
+  if (cmd === 'role') return toggleRole(row)
+  if (cmd === 'status') return toggleStatus(row)
+  if (cmd === 'password') return openAccount()
+}
+
+async function syncDept() {
+  syncing.value = true
+  try {
+    const r = await api.syncUserDept()
+    ElMessage.success(`已更新 ${r.updated} 个账号的部门`)
+    await load()
+    await loadOrg()
+  } catch (e) {
+    ElMessage.error(e.message || '同步失败')
+  } finally {
+    syncing.value = false
+  }
+}
+
 const createForm = reactive({ username: '', display_name: '', password: '', role: 'user', perms: [] })
 
 async function load() {
@@ -335,10 +498,36 @@ function openAccount() {
   ElMessage.info('请点右上角头像 → 账号设置')
 }
 
-onMounted(load)
+onMounted(async () => {
+  window.addEventListener('resize', onResize)
+  await loadOrg()
+  await load()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+})
 </script>
 
 <style scoped>
+.table-scroll { overflow-x: auto; }
+.table-scroll :deep(.el-table__body-wrapper) { overflow-x: auto; }
+.binding-dot {
+  display: inline-block; margin-left: 5px;
+  font-size: 10px; color: #fff; background: #1B9AAA;
+  border-radius: 3px; padding: 0 3px; line-height: 14px; vertical-align: middle;
+}
+.org-wrap { display: flex; gap: 14px; align-items: flex-start; }
+.org-tree { width: 260px; flex: none; }
+.org-main { flex: 1; min-width: 0; }
+.tree-box { padding: 8px 6px 14px; max-height: calc(100vh - 220px); overflow: auto; }
+.tree-node { display: flex; align-items: center; gap: 6px; width: 100%; }
+.tree-name { font-size: 13px; }
+.tree-count {
+  margin-left: auto; font-size: 11px; color: #6B7280;
+  background: #F1F3F5; border-radius: 9px; padding: 0 6px; line-height: 16px;
+}
+:deep(.el-tree-node__content) { height: 30px; }
 .sync-row {
   margin-top: 12px;
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;

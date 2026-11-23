@@ -38,9 +38,27 @@
                 <el-input v-model="form.batch_no" placeholder="留空自动生成" />
               </el-form-item>
             </el-col>
-            <el-col :span="24">
+            <el-col :span="8">
+              <el-form-item label="报销部门">
+                <el-select v-model="form.dept_name" placeholder="选填" clearable filterable
+                           allow-create default-first-option style="width:100%"
+                           @change="rememberDict('dept', $event)">
+                  <el-option v-for="d in deptOptions" :key="d" :label="d" :value="d" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="报销项目">
+                <el-select v-model="form.project_name" placeholder="选填" clearable filterable
+                           allow-create default-first-option style="width:100%"
+                           @change="rememberDict('project', $event)">
+                  <el-option v-for="p in projectOptions" :key="p" :label="p" :value="p" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
               <el-form-item label="本单备注">
-                <el-input v-model="form.note" placeholder="选填，作用于这一整单" />
+                <el-input v-model="form.note" placeholder="选填" />
               </el-form-item>
             </el-col>
           </el-row>
@@ -163,6 +181,10 @@
             <th>报销人</th><td>{{ form.person }}</td>
             <th>发票张数</th><td>{{ items.length }} 张</td>
           </tr>
+          <tr v-if="form.dept_name || form.project_name">
+            <th>报销部门</th><td>{{ form.dept_name || '—' }}</td>
+            <th>报销项目</th><td>{{ form.project_name || '—' }}</td>
+          </tr>
           <tr v-if="form.note">
             <th>备注</th><td colspan="3">{{ form.note }}</td>
           </tr>
@@ -226,7 +248,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
@@ -235,18 +257,46 @@ import { applyStats, state } from '../store'
 
 const router = useRouter()
 
+onMounted(() => { loadDict() })
+
 const fileInput = ref(null)
 const dragging = ref(false)
 const busy = ref('')
 const submitting = ref(false)
 const previewDlg = ref(false)
+const deptOptions = ref([])
+const projectOptions = ref([])
+
+/** 读字典：部门 / 项目 */
+async function loadDict() {
+  try {
+    const r = await api.dict()
+    const items = r.items || []
+    deptOptions.value = items.filter(x => x.type === 'dept' && x.enabled).map(x => x.name)
+    projectOptions.value = items.filter(x => x.type === 'project' && x.enabled).map(x => x.name)
+  } catch (e) {
+    // 字典读不到不影响填单
+  }
+}
+
+/** 下拉里手输了新名字 → 顺手存进字典（管理员才有权限，失败就忽略） */
+async function rememberDict(type, name) {
+  if (!name || !String(name).trim()) return
+  try {
+    await api.dictSave({ type, name: String(name).trim() })
+    await loadDict()
+  } catch (e) {
+    // 没权限就跳过
+  }
+}
 
 const today = new Date()
 const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 
 const form = reactive({
   person: String(state.me?.display_name || state.me?.username || ''),
-  payee: '', reimburse_date: iso, batch_no: '', note: ''
+  payee: '', reimburse_date: iso, batch_no: '', note: '',
+  dept_name: '', project_name: ''
 })
 const items = ref([])
 // 收款信息：一行 = 一个人 + 一笔金额
@@ -394,6 +444,8 @@ async function submit() {
       })),
       reimburse_date: form.reimburse_date || '',
       batch_no: form.batch_no.trim(),
+      dept_name: form.dept_name || '',
+      project_name: form.project_name || '',
       note: form.note.trim(),
       items: items.value.map(({ _dup, _warn, ...rest }) => rest)
     })

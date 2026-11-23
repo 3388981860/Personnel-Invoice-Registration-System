@@ -67,6 +67,44 @@
           <el-col :span="12"><div ref="watchRef" class="chart" /></el-col>
         </el-row>
 
+        <!-- 按项目集 -->
+        <template v-if="contract.by_set && contract.by_set.length">
+          <div class="sec-title" style="margin-top:16px">
+            按项目集
+            <span class="sub">共 {{ contract.by_set.length }} 个集</span>
+          </div>
+          <div class="set-table">
+            <div class="set-row set-head">
+              <span class="c-name">项目集</span>
+              <span class="c-num">项目</span>
+              <span class="c-num">合同</span>
+              <span class="c-money">收入合同</span>
+              <span class="c-money">已开票</span>
+              <span class="c-money">已回款</span>
+              <span class="c-bar">回款进度</span>
+            </div>
+            <div v-for="s in contract.by_set" :key="s.id" class="set-row">
+              <span class="c-name">
+                {{ s.name }}
+                <span class="set-code mono">{{ s.code }}</span>
+              </span>
+              <span class="c-num">{{ s.projects }}</span>
+              <span class="c-num">{{ s.contracts }}</span>
+              <span class="c-money mono">{{ money(s.income) }}</span>
+              <span class="c-money mono">{{ money(s.invoiced) }}</span>
+              <span class="c-money mono">{{ money(s.received) }}</span>
+              <span class="c-bar">
+                <el-progress
+                  :percentage="s.paid_ratio || 0"
+                  :stroke-width="10"
+                  :color="ratioColor(s.paid_ratio)"
+                />
+                <span class="sr-remain" v-if="s.remain > 0">未收 {{ money(s.remain) }}</span>
+              </span>
+            </div>
+          </div>
+        </template>
+
         <div class="sec-title">发票与查验</div>
         <div ref="trendRef" class="chart" />
         <el-row :gutter="12">
@@ -100,7 +138,16 @@ const sub = computed(() => {
   return `共 ${o.claims || 0} 张发票，${o.users || 0} 个在用账号`
 })
 
-const contract = reactive({ totals: null, by_unit: [], watch: [] })
+const contract = reactive({ totals: null, by_unit: [], watch: [], by_set: [] })
+
+/** 回款进度条的颜色：低红、中黄、高绿 */
+function ratioColor(p) {
+  const v = Number(p || 0)
+  if (v >= 90) return '#16A34A'
+  if (v >= 50) return '#C8A45C'
+  if (v > 0) return '#E0A32E'
+  return '#CBD5E1'
+}
 
 function money(v) {
   return '¥' + Number(v || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
@@ -227,6 +274,7 @@ async function loadContract() {
     const r = await api.contractsOverview()
     contract.totals = r.totals
     contract.by_unit = r.by_unit || []
+  contract.by_set = r.by_set || []
     contract.watch = r.watch || []
     nextTick(() => drawContract())
   } catch (e) {
@@ -308,6 +356,24 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.set-table { border: 1px solid #E8EDF4; border-radius: 6px; overflow: hidden; }
+.set-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px; font-size: 13px; color: var(--brand-text);
+  border-bottom: 1px solid #F1F4F8;
+}
+.set-row:last-child { border-bottom: none; }
+.set-row.set-head {
+  background: #F5F8FC; font-size: 12px; color: #6B7280; font-weight: 500;
+  padding: 8px 14px;
+}
+.c-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-code { font-size: 11px; color: #9AA6B6; margin-left: 6px; }
+.c-num { flex: 0 0 52px; text-align: right; color: #4B5563; }
+.c-money { flex: 0 0 108px; text-align: right; font-variant-numeric: tabular-nums; }
+.c-bar { flex: 0 0 220px; display: flex; align-items: center; gap: 8px; }
+.c-bar .el-progress { flex: 1; }
+.sr-remain { flex: none; font-size: 11.5px; color: #C62828; }
 .sec-title {
   margin: 16px 0 10px; padding-bottom: 6px;
   font-size: 13px; font-weight: 600; color: #374151;

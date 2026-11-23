@@ -94,6 +94,13 @@ export const api = {
   attendanceCalendarSet: (body) => post('/api/attendance/calendar/set', body),
   attendanceCalendarSync: (body) => post('/api/attendance/calendar/sync', body),
   attendanceRemind: () => post('/api/attendance/remind', {}),
+  dict: (type) => get('/api/dict' + (type ? '?type=' + type : '')),
+  dictSave: (body) => post('/api/dict/save', body),
+  dictImport: (body) => post('/api/dict/import', body),
+  dictDelete: (body) => post('/api/dict/delete', body),
+  syncUserDept: () => post('/api/users/sync-dept', {}),
+  userOrg: () => get('/api/users/org'),
+
   attendanceExempt: () => get('/api/attendance/exempt'),
   attendanceExemptSet: (body) => post('/api/attendance/exempt/set', body),
 
@@ -165,6 +172,8 @@ export const api = {
 
   // ---- 合同管理 ----
   projects: (query) => get('/api/projects', query),
+  projectSets: () => get('/api/project_sets'),
+  projectSetSave: (body) => post('/api/project_set/save', body),
   project: (id) => get('/api/project', { id }),
   saveProject: (payload) => post('/api/project/save', payload),
   deleteProject: (id) => post('/api/project/delete', { id }),

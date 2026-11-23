@@ -106,14 +106,34 @@ public class SchemaMigrator implements ApplicationRunner {
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_billings_contract "
                 + "ON contract_billings(contract_id)");
 
-        // 考勤缓存补列：补卡次数、审批类型备注
+
+        // 用户部门（从钉钉通讯录同步过来）
         try {
-            jdbc.queryForList("SELECT has_fix FROM attendance_daily LIMIT 1");
+            jdbc.queryForList("SELECT dept_name FROM users LIMIT 1");
         } catch (Exception e) {
-            jdbc.execute("ALTER TABLE attendance_daily ADD COLUMN has_fix INTEGER DEFAULT 0");
-            jdbc.execute("ALTER TABLE attendance_daily ADD COLUMN approval_note TEXT");
-            log.info("attendance_daily 已补 has_fix / approval_note 列");
+            jdbc.execute("ALTER TABLE users ADD COLUMN dept_name TEXT");
+            jdbc.execute("ALTER TABLE users ADD COLUMN dept_ids TEXT");
+            jdbc.execute("ALTER TABLE users ADD COLUMN dingtalk_title TEXT");
+            log.info("users 表已补部门相关列");
         }
+
+        // 报销单上的部门 / 项目（来自数据字典，可留空）
+        try {
+            jdbc.queryForList("SELECT dept_name FROM batches LIMIT 1");
+        } catch (Exception e) {
+            jdbc.execute("ALTER TABLE batches ADD COLUMN dept_name TEXT");
+            jdbc.execute("ALTER TABLE batches ADD COLUMN project_name TEXT");
+            log.info("batches 表已补 dept_name / project_name 列");
+        }
+
+        // 数据字典：报销部门、报销项目
+        jdbc.execute("CREATE TABLE IF NOT EXISTS dict_items ("
+                + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + "type TEXT NOT NULL,"
+                + "name TEXT NOT NULL,"
+                + "sort_no INTEGER DEFAULT 0,"
+                + "enabled INTEGER DEFAULT 1,"
+                + "created_at TEXT)");
 
         // 免考勤人员：这些人不参与统计、也不收未打卡提醒
         jdbc.execute("CREATE TABLE IF NOT EXISTS attendance_exempt ("
@@ -143,6 +163,19 @@ public class SchemaMigrator implements ApplicationRunner {
                 + "has_leave INTEGER DEFAULT 0,"
                 + "updated_at TEXT,"
                 + "PRIMARY KEY (work_date, dt_userid))");
+
+        // 考勤缓存补列（建表之后才能补，且失败不影响后续迁移）
+        try {
+            jdbc.queryForList("SELECT has_fix FROM attendance_daily LIMIT 1");
+        } catch (Exception e) {
+            try {
+                jdbc.execute("ALTER TABLE attendance_daily ADD COLUMN has_fix INTEGER DEFAULT 0");
+                jdbc.execute("ALTER TABLE attendance_daily ADD COLUMN approval_note TEXT");
+                log.info("attendance_daily 已补 has_fix / approval_note 列");
+            } catch (Exception e2) {
+                log.warn("补考勤列失败：" + e2.getMessage());
+            }
+        }
 
         // 钉钉账号绑定
         try {

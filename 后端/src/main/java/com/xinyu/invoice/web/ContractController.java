@@ -45,20 +45,47 @@ public class ContractController extends BaseController {
 
     @GetMapping("/api/projects")
     public Map<String, Object> projects(@RequestParam(required = false) String q,
+                                        @RequestParam(required = false) String set_id,
                                         HttpServletRequest req) {
         Map<String, Object> u = requirePerm(req, "contracts");
         Long owner = SessionService.isAdmin(u) ? null : uid(u);
-        List<Map<String, Object>> rows = repo.projects(owner);
+        Long setId = (set_id == null || set_id.isBlank()) ? null : Long.parseLong(set_id.strip());
+        List<Map<String, Object>> rows = repo.projects(owner, setId);
         if (q != null && !q.isBlank()) {
             String k = q.strip().toLowerCase();
             rows = rows.stream().filter(r -> (
-                    str(r.get("name")) + str(r.get("unit")) + str(r.get("code")))
+                    str(r.get("name")) + str(r.get("unit")) + str(r.get("code"))
+                            + str(r.get("set_name")))
                     .toLowerCase().contains(k)).toList();
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ok", true);
         out.put("projects", rows);
         return out;
+    }
+
+    /** 项目集列表 */
+    @GetMapping("/api/project_sets")
+    public Map<String, Object> projectSets(HttpServletRequest req) {
+        requirePerm(req, "contracts");
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ok", true);
+        out.put("sets", repo.projectSets());
+        return out;
+    }
+
+    /** 新建 / 修改项目集 */
+    @PostMapping("/api/project_set/save")
+    public Map<String, Object> saveProjectSet(@RequestBody Map<String, Object> body,
+                                              HttpServletRequest req) {
+        Map<String, Object> u = requirePerm(req, "contracts");
+        Object id = body.get("id");
+        if (!SessionService.isAdmin(u) && id instanceof Number) {
+            // 项目集是公共的分组，只有管理员能改（集本身没有归属人）
+            throw new ApiException("只有管理员能改项目集", 403);
+        }
+        long newId = repo.saveProjectSet(body);
+        return Map.of("ok", true, "id", newId);
     }
 
     @GetMapping("/api/project")

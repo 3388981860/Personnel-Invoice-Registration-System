@@ -8,7 +8,35 @@
                     style="width:240px" @keyup.enter="reload" @clear="reload" />
           <el-button @click="reload">刷新</el-button>
           <el-button @click="exportExcel">导出</el-button>
+          <el-button v-if="isAdmin" @click="openSetDialog">+ 新建项目集</el-button>
           <el-button type="primary" @click="openProject()">+ 新建项目</el-button>
+        </div>
+      </div>
+
+      <!-- 项目集切换 -->
+      <div class="set-bar">
+        <span class="set-label">项目集</span>
+        <div class="set-chips">
+          <span class="set-chip" :class="{ on: activeSet === '' }" @click="pickSet('')">
+            全部 <b>{{ totalCount }}</b>
+          </span>
+          <span v-for="s in sets" :key="s.id" class="set-chip"
+                :class="{ on: activeSet === s.id }" @click="pickSet(s.id)">
+            {{ s.name }} <b>{{ s.project_count }}</b>
+          </span>
+        </div>
+      </div>
+
+      <!-- 选中某个集时的汇总 -->
+      <div v-if="activeSetData" class="set-summary">
+        <div class="ss-item"><span class="ss-k">项目</span><b>{{ activeSetData.project_count }}</b> 个</div>
+        <div class="ss-item"><span class="ss-k">合同</span><b>{{ setSum.contracts }}</b> 份</div>
+        <div class="ss-item"><span class="ss-k">收入合同</span><b class="money">{{ money(setSum.income) }}</b></div>
+        <div class="ss-item"><span class="ss-k">已开票</span><b class="money">{{ money(setSum.invoiced) }}</b></div>
+        <div class="ss-item"><span class="ss-k">已回款</span><b class="money green">{{ money(setSum.received) }}</b></div>
+        <div class="ss-item"><span class="ss-k">外协成本</span><b class="money red">{{ money(setSum.cost) }}</b></div>
+        <div class="ss-item" v-if="activeSetData.code">
+          <span class="ss-k">集编号</span><b class="mono">{{ activeSetData.code }}</b>
         </div>
       </div>
 
@@ -19,7 +47,12 @@
       <el-table :data="pagedProjects" v-loading="loading" size="small" border
                 max-height="calc(100vh - 300px)"
                 empty-text="还没有项目，点右上角「新建项目」">
-        <el-table-column prop="code" label="编号" width="90" />
+        <el-table-column prop="code" label="编号" width="104" />
+        <el-table-column label="项目集" width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span :class="{ 'text-muted': !row.set_name }">{{ row.set_name || '—' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="项目名称" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
             <el-link type="primary" :underline="false" class="proj-link"
@@ -182,7 +215,13 @@
                width="520px" append-to-body>
       <el-form label-position="top">
         <div class="form-row">
-          <el-form-item label="编号">
+          <el-form-item label="所属项目集">
+          <el-select v-model="pform.set_id" clearable placeholder="不选则不属于任何集"
+                     style="width:100%">
+            <el-option v-for="s in sets" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="编号">
             <el-input v-model="pform.code" placeholder="留空自动生成，如 HT-2026-001" />
           </el-form-item>
           <el-form-item label="甲方单位">
@@ -343,6 +382,28 @@ import { api } from '../api'
 import { isAdmin } from '../store'
 
 const q = ref('')
+const sets = ref([])
+const activeSet = ref('')
+
+/** 当前选中的项目集对象 */
+const activeSetData = computed(() =>
+  sets.value.find(s => s.id === activeSet.value) || null)
+
+/** 全部项目数 */
+const totalCount = computed(() => sets.value.reduce((n, s) => n + (s.project_count || 0), 0))
+
+/** 选中集下的汇总（按页面上这批项目的金额加总） */
+const setSum = computed(() => {
+  const r = { contracts: 0, income: 0, invoiced: 0, received: 0, cost: 0 }
+  for (const p of projects.value) {
+    r.contracts += Number(p.contract_count || 0)
+    r.income += Number(p.income_amount || 0)
+    r.invoiced += Number(p.invoiced || 0)
+    r.received += Number(p.received || 0)
+    r.cost += Number(p.cost_amount || 0)
+  }
+  return r
+})
 const projects = ref([])
 const page = ref(1)
 const pageSize = ref(20)
@@ -402,10 +463,41 @@ function signedType(s) {
   return { 已签: 'success', 待上会: 'warning', 谈判中: 'warning', 未签: 'info' }[s] || 'info'
 }
 
+/** 切换项目集 */
+function pickSet(id) {
+  activeSet.value = id
+  page.value = 1
+  reload()
+}
+
+/** 拉项目集列表 */
+async function loadSets() {
+  try {
+    const r = await api.projectSets()
+    sets.value = r.sets || []
+  } catch (e) {
+    sets.value = []
+  }
+}
+
+async function openSetDialog() {
+  try {
+    const { value } = await ElMessageBox.prompt('给这个项目集起个名字', '新建项目集', {
+      inputPlaceholder: '比如：2027年瓯海区集约化运维项目',
+      inputValidator: v => (v && v.trim() ? true : '名字不能为空')
+    })
+    await api.projectSetSave({ name: value.trim() })
+    ElMessage.success('已创建')
+    await loadSets()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message || '创建失败')
+  }
+}
+
 async function reload() {
   loading.value = true
   try {
-    const r = await api.projects({ q: q.value })
+    const r = await api.projects({ q: q.value, set_id: activeSet.value || '' })
     projects.value = r.projects || []
     page.value = 1
   } catch (e) {
@@ -417,7 +509,7 @@ async function reload() {
 
 async function openProject(id) {
   if (id == null) {
-    pform.value = { code: '', name: '', unit: '', start_date: '', end_date: '', note: '' }
+    pform.value = { code: '', name: '', unit: '', start_date: '', end_date: '', note: '', set_id: activeSet.value || null }
     projectDlg.value = true
     return
   }
@@ -632,10 +724,44 @@ function openFile(id) {
   window.open(`/api/contract/file?id=${id}`, '_blank')
 }
 
-onMounted(reload)
+onMounted(async () => {
+  await loadSets()
+  await reload()
+})
 </script>
 
 <style scoped>
+.set-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; border-bottom: 1px solid #EEF1F5;
+  background: #FAFBFD;
+}
+.set-label { font-size: 12.5px; color: #6B7280; flex: none; }
+.set-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.set-chip {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  padding: 5px 12px; border-radius: 16px;
+  background: #fff; border: 1px solid #E2E8F0;
+  font-size: 12.5px; color: #4B5563; cursor: pointer;
+  transition: all .15s;
+}
+.set-chip:hover { border-color: #B9CDE8; color: #1B4F8C; }
+.set-chip.on {
+  background: #1B4F8C; border-color: #1B4F8C; color: #fff;
+}
+.set-chip b { font-size: 12px; font-weight: 600; opacity: .85; }
+
+.set-summary {
+  display: flex; align-items: center; gap: 26px; flex-wrap: wrap;
+  padding: 12px 16px; background: #F4F7FC;
+  border-bottom: 1px solid #E3EAF4;
+}
+.ss-item { font-size: 12.5px; color: #6B7280; display: flex; align-items: baseline; gap: 6px; }
+.ss-item b { font-size: 15px; color: var(--brand-text); font-variant-numeric: tabular-nums; }
+.ss-k { color: #94A3B8; }
+.ss-item b.green { color: #2E7D32; }
+.ss-item b.red { color: #C62828; }
+
 .panel { background: #fff; border-radius: 6px; }
 .pager {
   display: flex; justify-content: flex-end;

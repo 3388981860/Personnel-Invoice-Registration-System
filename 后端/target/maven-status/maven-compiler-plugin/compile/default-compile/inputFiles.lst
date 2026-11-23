@@ -23,6 +23,7 @@ D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\HealthController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\config\SchemaMigrator.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\DingTalkController.java
+D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\DictController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\AuthController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\repo\InvoiceRepo.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\repo\StatsRepo.java

@@ -59,6 +59,12 @@ public class BatchRepo {
 
     /** 建一张报销单；指定的单号重复时自动加 -2、-3 */
     public long createBatch(String batchNo, String note, Long ownerId, String reviewStatus) {
+        return createBatch(batchNo, note, ownerId, reviewStatus, null, null);
+    }
+
+    /** 带报销部门 / 项目的建单 */
+    public long createBatch(String batchNo, String note, Long ownerId, String reviewStatus,
+                            String deptName, String projectName) {
         String no = (batchNo == null || batchNo.isBlank()) ? nextBatchNo() : batchNo.trim();
         for (int i = 2; exists(no); i++) {
             no = batchNo.trim() + "-" + i;
@@ -74,8 +80,11 @@ public class BatchRepo {
         p.addValue("now", now);
         p.addValue("owner", ownerId);
         p.addValue("review", reviewStatus == null ? "submitted" : reviewStatus);
+        p.addValue("dept", deptName);
+        p.addValue("proj", projectName);
         jdbc.update("INSERT INTO batches (batch_no, note, created_at, updated_at, owner_id,"
-                        + " review_status) VALUES (:no,:note,:now,:now,:owner,:review)",
+                        + " review_status, dept_name, project_name)"
+                        + " VALUES (:no,:note,:now,:now,:owner,:review,:dept,:proj)",
                 p, keys, new String[]{"id"});
         Number key = keys.getKey();
         if (key == null) {
