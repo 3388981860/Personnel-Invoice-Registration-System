@@ -51,6 +51,10 @@ public class DingTalkLoginController {
     @Value("${app.dingtalk.redirect-uri:}")
     private String redirectUri;
 
+    /** 扫码的人如果没有系统账号，要不要自动开一个（默认开） */
+    @Value("${app.dingtalk.auto-create:true}")
+    private boolean autoCreate;
+
     public DingTalkLoginController(DingTalkService ding, SessionService sessions, JdbcTemplate jdbc) {
         this.ding = ding;
         this.sessions = sessions;
@@ -107,9 +111,13 @@ public class DingTalkLoginController {
 
             Map<String, Object> user = matchUser(unionId, mobile, nick);
             if (user == null) {
-                redirect(resp, "/login?ding_error=" + enc(
-                        "钉钉账号「" + nick + "」还没开通系统账号，请联系管理员"));
-                return;
+                if (!autoCreate) {
+                    redirect(resp, "/login?ding_error=" + enc(
+                            "钉钉账号「" + nick + "」还没开通系统账号，请联系管理员"));
+                    return;
+                }
+                user = createFromDingTalk(unionId, nick, mobile);
+                log.info("钉钉扫码自动开通账号：{}（dongtalk unionId {})", nick, unionId);
             }
             if (((Number) user.get("status")).intValue() != 1) {
                 redirect(resp, "/login?ding_error=" + enc("这个账号已被停用"));
@@ -128,6 +136,68 @@ public class DingTalkLoginController {
             log.warn("钉钉登录失败：{}", e.getMessage());
             redirect(resp, "/login?ding_error=" + enc("钉钉登录失败：" + e.getMessage()));
         }
+    }
+
+    /**
+     * 扫码的人没有系统账号时，直接开一个。
+     *
+     * 用户名优先用手机号（好认），没手机号就用 unionId 前缀；
+     * 权限留空，等管理员分配。
+     */
+    private Map<String, Object> createFromDingTalk(String unionId, String nick, String mobile) {
+        String username = (mobile != null && !mobile.isBlank()) ? mobile.trim()
+                : "dt_" + unionId.substring(0, Math.min(10, unionId.length()));
+        // 重名就加后缀
+        String base = username;
+        int n = 2;
+        while (!jdbc.queryForList("SELECT id FROM users WHERE username = ?", username).isEmpty()) {
+            username = base + "_" + n;
+            n++;
+        }
+
+        String display = (nick == null || nick.isBlank()) ? username : nick.trim();
+        String now = LocalDateTime.now().format(SessionService.TS);
+        // 随机密码：他们用钉钉登录，不需要知道密码；管理员可重置
+        String pwd = com.xinyu.invoice.auth.PasswordTool.hash(
+                UUID.randomUUID().toString().replace("-", ""));
+
+        jdbc.update("INSERT INTO users (username, password_hash, display_name, role, status,"
+                        + " must_change_pw, perms, dingtalk_userid, dingtalk_union_id,"
+                        + " created_at, last_login_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                username, pwd, display, "user", 1, 0, com.xinyu.invoice.auth.Perm.serialize(com.xinyu.invoice.auth.Perm.DEFAULT), null, unionId, now, now);
+
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT * FROM users WHERE username = ?", username);
+        Map<String, Object> u = rows.get(0);
+
+        // 顺手把手机号对应的钉钉 userid 也绑上，方便后面发工作通知
+        try {
+            String dtId = ding.userIdByMobile(mobile);
+            if (dtId != null && !dtId.isBlank()) {
+                jdbc.update("UPDATE users SET dingtalk_userid = ? WHERE id = ?", dtId, u.get("id"));
+                u.put("dingtalk_userid", dtId);
+            }
+        } catch (Exception e) {
+            log.debug("补绑钉钉 userid 失败：{}", e.getMessage());
+        }
+
+try {
+            jdbc.update("INSERT INTO audit_logs (user_id, username, action, target_type,"
+                            + " target_id, detail, created_at) VALUES (?,?,?,?,?,?,?)",
+                    u.get("id"), username, "user_create", "user", u.get("id"),
+                    "钉钉扫码自动开通（" + display + "）", now);
+            // 告诉管理员：来了个新同事
+            for (Map<String, Object> a : jdbc.queryForList(
+                    "SELECT id FROM users WHERE role = 'admin' AND status = 1")) {
+                jdbc.update("INSERT INTO notifications (user_id, kind, title, body, created_at)"
+                                + " VALUES (?,?,?,?,?)",
+                        a.get("id"), "user", "新同事加入",
+                        display + " 用钉钉扫码登录，已自动开通账号（权限待分配）", now);
+            }
+        } catch (Exception ignored) {
+            // 日志/通知失败不影响登录
+        }
+        return u;
     }
 
     /** 依次尝试：unionId → 手机号对应的钉钉 userid → 姓名 */
