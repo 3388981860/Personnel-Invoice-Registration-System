@@ -1,8 +1,10 @@
 com\xinyu\invoice\web\HealthController.class
+com\xinyu\invoice\service\WorkdayCalendarService.class
 com\xinyu\invoice\web\ContractController.class
 com\xinyu\invoice\InvoiceApplication.class
 com\xinyu\invoice\web\ToolController.class
 com\xinyu\invoice\auth\SessionService.class
+com\xinyu\invoice\service\AttendanceMonthService.class
 com\xinyu\invoice\common\GlobalExceptionHandler.class
 com\xinyu\invoice\web\FileController.class
 com\xinyu\invoice\web\AttendanceController.class
@@ -41,6 +43,7 @@ com\xinyu\invoice\web\NotificationController.class
 com\xinyu\invoice\service\ParseService.class
 com\xinyu\invoice\web\AuditController.class
 com\xinyu\invoice\web\AuthController.class
+com\xinyu\invoice\service\AttendanceReminderService.class
 com\xinyu\invoice\web\UserController.class
 com\xinyu\invoice\repo\BatchQueryRepo.class
 com\xinyu\invoice\config\AppProps.class

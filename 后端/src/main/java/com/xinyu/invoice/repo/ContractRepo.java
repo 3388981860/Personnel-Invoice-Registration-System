@@ -33,8 +33,58 @@ public class ContractRepo {
 
     // ---------------------------------------------------------------- 项目
 
+    /** 项目集列表（带项目数） */
+    public List<Map<String, Object>> projectSets() {
+        return jdbc.queryForList("""
+                SELECT s.*,
+                  (SELECT COUNT(*) FROM projects p WHERE p.set_id = s.id) AS project_count
+                FROM project_sets s ORDER BY s.year DESC, s.id DESC
+                """);
+    }
+
+    /** 保存项目集（没有 id 就新建，编号 JC-年份-序号） */
+    public long saveProjectSet(Map<String, Object> b) {
+        String name = str(b.get("name")).strip();
+        if (name.isEmpty()) {
+            throw new ApiException("请填写项目集名称", 400, "name");
+        }
+        String now = LocalDateTime.now().format(TS);
+        Object id = b.get("id");
+        if (id instanceof Number n) {
+            jdbc.update("UPDATE project_sets SET name=?, year=?, unit=?, note=? WHERE id=?",
+                    name,
+                    b.get("year") == null ? null : Integer.parseInt(String.valueOf(b.get("year"))),
+                    blank(b.get("unit")), blank(b.get("note")), n.longValue());
+            return n.longValue();
+        }
+        int year = b.get("year") == null
+                ? java.time.LocalDate.now().getYear()
+                : Integer.parseInt(String.valueOf(b.get("year")).trim());
+        String prefix = "JC-" + year + "-";
+        int next = 1;
+        for (Map<String, Object> r : jdbc.queryForList(
+                "SELECT code FROM project_sets WHERE code LIKE ?", prefix + "%")) {
+            String tail = String.valueOf(r.get("code")).substring(prefix.length());
+            try {
+                next = Math.max(next, Integer.parseInt(tail.replaceAll("[^0-9]", "")) + 1);
+            } catch (NumberFormatException ignored) {
+                // 跳过不规范的
+            }
+        }
+        jdbc.update("INSERT INTO project_sets (code, name, year, unit, note, created_at)"
+                        + " VALUES (?,?,?,?,?,?)",
+                prefix + String.format("%03d", next), name, year,
+                blank(b.get("unit")), blank(b.get("note")), now);
+        Long newId = jdbc.queryForObject("SELECT last_insert_rowid()", Long.class);
+        return newId == null ? 0 : newId;
+    }
+
     /** 项目列表：带上合同数、收入合计、已开票、已回款 */
     public List<Map<String, Object>> projects(Long ownerId) {
+        return projects(ownerId, null);
+    }
+
+    public List<Map<String, Object>> projects(Long ownerId, Long setId) {
         String sql = """
                 SELECT p.*,
                   (SELECT COALESCE(NULLIF(u.display_name,''), u.username) FROM users u
@@ -130,6 +180,30 @@ public class ContractRepo {
 
     // ---------------------------------------------------------------- 保存
 
+    /**
+     * 下一个项目编号，规则 HT-年份-序号，例如 HT-2026-001。
+     * 序号在该年份内递增，取已有最大号 +1。
+     */
+    public String nextProjectCode() {
+        String year = String.valueOf(java.time.LocalDate.now().getYear());
+        String prefix = "HT-" + year + "-";
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT code FROM projects WHERE code LIKE ? ORDER BY code DESC LIMIT 1", prefix + "%");
+        int next = 1;
+        if (!rows.isEmpty()) {
+            String last = String.valueOf(rows.get(0).get("code"));
+            String tail = last.substring(prefix.length());
+            try {
+                next = Integer.parseInt(tail.replaceAll("[^0-9]", "")) + 1;
+            } catch (NumberFormatException e) {
+                List<Map<String, Object>> all = jdbc.queryForList(
+                        "SELECT code FROM projects WHERE code LIKE ?", prefix + "%");
+                next = all.size() + 1;
+            }
+        }
+        return prefix + String.format("%03d", next);
+    }
+
     public long saveProject(Map<String, Object> b, Long ownerId) {
         String name = str(b.get("name")).strip();
         if (name.isEmpty()) {
@@ -139,15 +213,21 @@ public class ContractRepo {
         Object id = b.get("id");
         if (id instanceof Number n) {
             jdbc.update("UPDATE projects SET code=?, name=?, unit=?, start_date=?, "
-                            + "end_date=?, note=?, updated_at=? WHERE id=?",
+                            + "end_date=?, note=?, set_id=?, updated_at=? WHERE id=?",
                     blank(b.get("code")), name, blank(b.get("unit")),
                     blank(b.get("start_date")), blank(b.get("end_date")),
-                    blank(b.get("note")), now, n.longValue());
+                    blank(b.get("note")),
+                    b.get("set_id") == null ? null : Long.parseLong(String.valueOf(b.get("set_id"))),
+                    now, n.longValue());
             return n.longValue();
+        }
+        String code = str(b.get("code")).strip();
+        if (code.isEmpty()) {
+            code = nextProjectCode();     // 没填就按 HT-YYYY-序号 自动生成
         }
         jdbc.update("INSERT INTO projects (code, name, unit, start_date, end_date, "
                         + "owner_id, note, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                blank(b.get("code")), name, blank(b.get("unit")),
+                code, name, blank(b.get("unit")),
                 blank(b.get("start_date")), blank(b.get("end_date")),
                 ownerId, blank(b.get("note")), now, now);
         Long newId = jdbc.queryForObject("SELECT last_insert_rowid()", Long.class);

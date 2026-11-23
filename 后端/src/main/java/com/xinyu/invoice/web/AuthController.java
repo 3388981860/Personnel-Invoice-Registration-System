@@ -177,8 +177,11 @@ public class AuthController extends BaseController {
     }
 
     private int pendingReviews() {
+        // 只数有发票的单据：空的（提交失败留下的）不该占红点
         Integer n = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM batches WHERE review_status = 'submitted'", Integer.class);
+                "SELECT COUNT(*) FROM batches b WHERE b.review_status = 'submitted'"
+                        + " AND EXISTS (SELECT 1 FROM invoices i WHERE i.batch_id = b.id)",
+                Integer.class);
         return n == null ? 0 : n;
     }
 

@@ -183,7 +183,7 @@
       <el-form label-position="top">
         <div class="form-row">
           <el-form-item label="编号">
-            <el-input v-model="pform.code" placeholder="如 200601" />
+            <el-input v-model="pform.code" placeholder="留空自动生成，如 HT-2026-001" />
           </el-form-item>
           <el-form-item label="甲方单位">
             <el-input v-model="pform.unit" placeholder="如 区财政局" />

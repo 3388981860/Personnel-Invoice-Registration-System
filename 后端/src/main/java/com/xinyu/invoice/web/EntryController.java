@@ -163,30 +163,42 @@ public class EntryController extends BaseController {
                 note.isEmpty() ? null : note, ownerId, "submitted");
 
         List<Long> ids = new ArrayList<>();
-        for (Object[] pair : clean) {
-            String no = (String) pair[0];
-            Map<String, Object> it = asMap(pair[1]);
+        try {
+            for (Object[] pair : clean) {
+                String no = (String) pair[0];
+                Map<String, Object> it = asMap(pair[1]);
 
-            Map<String, Object> rec = new LinkedHashMap<>();
-            rec.put("invoice_no", no);
-            rec.put("invoice_date", blankToNull(it.get("invoice_date")));
-            rec.put("amount", number(it.get("amount")));
-            rec.put("seller", blankToNull(it.get("seller")));
-            rec.put("buyer", blankToNull(it.get("buyer")));
-            rec.put("category", blankToNull(it.get("category")));
-            rec.put("source", blankToNull(it.get("source")));
-            rec.put("file_name", blankToNull(it.get("file_name")));
-            rec.put("person", person);
-            rec.put("payee", payee);
-            rec.put("reimburse_date", reimburseDate.isEmpty() ? null : reimburseDate);
-            rec.put("note", blankToNull(it.get("note")));
-            rec.put("status", 0);
-            rec.put("audit_status", 0);
-            rec.put("batch_id", bid);
-            rec.put("owner_id", ownerId);
+                Map<String, Object> rec = new LinkedHashMap<>();
+                rec.put("invoice_no", no);
+                rec.put("invoice_date", blankToNull(it.get("invoice_date")));
+                rec.put("amount", number(it.get("amount")));
+                rec.put("seller", blankToNull(it.get("seller")));
+                rec.put("buyer", blankToNull(it.get("buyer")));
+                rec.put("category", blankToNull(it.get("category")));
+                rec.put("source", blankToNull(it.get("source")));
+                rec.put("file_name", blankToNull(it.get("file_name")));
+                rec.put("person", person);
+                rec.put("payee", payee);
+                rec.put("reimburse_date", reimburseDate.isEmpty() ? null : reimburseDate);
+                rec.put("note", blankToNull(it.get("note")));
+                rec.put("status", 0);
+                rec.put("audit_status", 0);
+                rec.put("batch_id", bid);
+                rec.put("owner_id", ownerId);
 
-            Path tmp = tmpFile(it.get("token"));
-            ids.add(batches.insertInvoice(rec, tmp));
+                Path tmp = tmpFile(it.get("token"));
+                ids.add(batches.insertInvoice(rec, tmp));
+            }
+        } catch (RuntimeException e) {
+            // 发票写一半失败：把刚建的单据删掉，别留个空单占着待审核红点
+            try {
+                jdbc.update("DELETE FROM batch_payees WHERE batch_id = ?", bid);
+                jdbc.update("DELETE FROM invoices WHERE batch_id = ?", bid);
+                jdbc.update("DELETE FROM batches WHERE id = ?", bid);
+            } catch (Exception ignored) {
+                // 清理失败也要把异常抛出去
+            }
+            throw e;
         }
 
         payees.replace(bid, payeeList);

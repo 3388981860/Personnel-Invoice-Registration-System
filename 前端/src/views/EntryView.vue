@@ -146,6 +146,83 @@
       </div>
     </div>
   </div>
+    <!-- 提交前确认（打印预览） -->
+    <el-dialog v-model="previewDlg" title="确认提交" width="720px" append-to-body>
+      <div class="paper">
+        <div class="paper-hd">
+          <div class="paper-title">报 销 单</div>
+          <div class="paper-sub">人数行政平台</div>
+        </div>
+
+        <table class="paper-meta">
+          <tr>
+            <th>报销单号</th><td>{{ form.batch_no || '（提交后自动生成）' }}</td>
+            <th>报销日期</th><td>{{ form.reimburse_date || '—' }}</td>
+          </tr>
+          <tr>
+            <th>报销人</th><td>{{ form.person }}</td>
+            <th>发票张数</th><td>{{ items.length }} 张</td>
+          </tr>
+          <tr v-if="form.note">
+            <th>备注</th><td colspan="3">{{ form.note }}</td>
+          </tr>
+        </table>
+
+        <div class="paper-sec">收款信息</div>
+        <table class="paper-table">
+          <thead>
+            <tr><th style="width:50px">序号</th><th>收款人</th>
+                <th style="width:120px">金额</th><th>备注</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(p, i) in payees" :key="i">
+              <td>{{ i + 1 }}</td>
+              <td>{{ p.name }}</td>
+              <td class="num">{{ money(Number(p.amount) || 0) }}</td>
+              <td>{{ p.note || '' }}</td>
+            </tr>
+            <tr class="total">
+              <td colspan="2">合计</td>
+              <td class="num">{{ money(payTotal) }}</td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="paper-sec">发票明细</div>
+        <table class="paper-table">
+          <thead>
+            <tr>
+              <th style="width:44px">序</th><th>发票号码</th>
+              <th style="width:100px">开票日期</th><th style="width:100px">金额</th><th>销售方</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(it, i) in items" :key="i">
+              <td>{{ i + 1 }}</td>
+              <td class="mono">{{ it.invoice_no }}</td>
+              <td>{{ it.invoice_date || '' }}</td>
+              <td class="num">{{ money(Number(it.amount) || 0) }}</td>
+              <td>{{ it.seller || '' }}</td>
+            </tr>
+            <tr class="total">
+              <td colspan="3">合计</td>
+              <td class="num">{{ money(total) }}</td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="paper-foot">
+          提交后进入待审核。确认无误再提交，提交后如需修改要等审核人退回。
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="previewDlg = false">返回修改</el-button>
+        <el-button type="primary" :loading="submitting" @click="doSubmit">确认提交</el-button>
+      </template>
+    </el-dialog>
 </template>
 
 <script setup>
@@ -154,7 +231,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { api } from '../api'
-import { applyStats } from '../store'
+import { applyStats, state } from '../store'
 
 const router = useRouter()
 
@@ -162,12 +239,14 @@ const fileInput = ref(null)
 const dragging = ref(false)
 const busy = ref('')
 const submitting = ref(false)
+const previewDlg = ref(false)
 
 const today = new Date()
 const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 
 const form = reactive({
-  person: '', payee: '', reimburse_date: iso, batch_no: '', note: ''
+  person: String(state.me?.display_name || state.me?.username || ''),
+  payee: '', reimburse_date: iso, batch_no: '', note: ''
 })
 const items = ref([])
 // 收款信息：一行 = 一个人 + 一笔金额
@@ -264,10 +343,16 @@ async function uploadFiles(files) {
   busy.value = ''
 }
 
+/** 当前登录的人，作为报销人默认值 */
+function meName() {
+  return String(state.me?.display_name || state.me?.username || '').trim()
+}
+
 function clearAll() {
   items.value = []
   form.batch_no = ''
   form.note = ''
+  form.person = meName()          // 清空后仍带出自己
 }
 
 async function submit() {
@@ -292,7 +377,12 @@ async function submit() {
       `${payDiff.value > 0 ? '还差' : '多了'} ${money(Math.abs(payDiff.value))}`)
   }
 
-  submitting.value = true
+    // 校验通过 → 先出确认预览，确认后再真提交
+    previewDlg.value = true
+  }
+
+  async function doSubmit() {
+    submitting.value = true
   try {
     const r = await api.batchAdd({
       person: form.person.trim(),
@@ -308,6 +398,7 @@ async function submit() {
       items: items.value.map(({ _dup, _warn, ...rest }) => rest)
     })
     applyStats(r.stats)
+      previewDlg.value = false
     ElMessage.success(`已提交报销单 ${r.batch_no || ''}`)
     items.value = []
     payees.value = []
@@ -323,6 +414,26 @@ async function submit() {
 </script>
 
 <style scoped>
+.paper { background: #fff; padding: 8px 6px 4px; font-size: 13px; color: #1F2937; }
+.paper-hd { text-align: center; margin-bottom: 14px; }
+.paper-title { font-size: 20px; font-weight: 600; letter-spacing: 6px; }
+.paper-sub { font-size: 11px; color: #9AA6B6; letter-spacing: 2px; margin-top: 2px; }
+.paper-meta { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+.paper-meta th {
+  width: 78px; text-align: right; font-weight: 400; color: #6B7280;
+  padding: 5px 8px 5px 0; font-size: 12.5px;
+}
+.paper-meta td { border-bottom: 1px solid #E5E9F0; padding: 5px 10px 5px 4px; font-size: 13px; }
+.paper-sec {
+  font-size: 13px; font-weight: 600; margin: 14px 0 6px;
+  padding-left: 8px; border-left: 3px solid #1B4F8C;
+}
+.paper-table { width: 100%; border-collapse: collapse; }
+.paper-table th, .paper-table td { border: 1px solid #E0E5EC; padding: 6px 8px; font-size: 12.5px; }
+.paper-table th { background: #F5F7FA; font-weight: 500; color: #4B5563; }
+.paper-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.paper-table tr.total td { background: #FAFBFC; font-weight: 600; }
+.paper-foot { margin-top: 14px; font-size: 11.5px; color: #9AA6B6; text-align: center; }
 .pay-bar {
   display: flex; align-items: center; gap: 14px;
   padding: 16px 16px 8px; flex-wrap: wrap;
