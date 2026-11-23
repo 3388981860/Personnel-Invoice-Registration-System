@@ -103,6 +103,20 @@ public class SchemaMigrator implements ApplicationRunner {
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_billings_contract "
                 + "ON contract_billings(contract_id)");
 
+        // 考勤（每天每人一行，从钉钉拉取后缓存）
+        jdbc.execute("CREATE TABLE IF NOT EXISTS attendance_daily ("
+                + "work_date TEXT NOT NULL,"
+                + "dt_userid TEXT NOT NULL,"
+                + "name TEXT,"
+                + "on_duty TEXT,"
+                + "off_duty TEXT,"
+                + "on_result TEXT,"
+                + "off_result TEXT,"
+                + "address TEXT,"
+                + "has_leave INTEGER DEFAULT 0,"
+                + "updated_at TEXT,"
+                + "PRIMARY KEY (work_date, dt_userid))");
+
         // 钉钉账号绑定
         try {
             jdbc.queryForList("SELECT dingtalk_userid FROM users LIMIT 1");

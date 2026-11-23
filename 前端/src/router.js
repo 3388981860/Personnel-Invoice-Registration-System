@@ -15,7 +15,8 @@ const routes = [
         { path: 'notice', name: 'notice', component: () => import('./views/NoticeView.vue'), meta: { title: '公告', group: '业务' } },
   { path: 'tools', name: 'tools', component: () => import('./views/ToolsView.vue'), meta: { title: '工具箱', group: '业务' } },
   { path: 'contracts', name: 'contracts', component: () => import('./views/ContractsView.vue'), meta: { title: '合同台账', group: '业务', perm: 'contracts' } },
-      { path: 'stats', name: 'stats', component: () => import('./views/StatsView.vue'), meta: { title: '数据总览', group: '管理', perm: 'stats' } },
+      { path: 'attendance', name: 'attendance', component: () => import('./views/AttendanceView.vue'), meta: { title: '考勤看板', group: '管理', perm: 'attendance' } },
+  { path: 'stats', name: 'stats', component: () => import('./views/StatsView.vue'), meta: { title: '数据总览', group: '管理', perm: 'stats' } },
       { path: 'users', name: 'users', component: () => import('./views/UsersView.vue'), meta: { title: '用户管理', group: '管理', perm: 'users' } },
       { path: 'logs', name: 'logs', component: () => import('./views/LogsView.vue'), meta: { title: '操作日志', group: '管理', perm: 'logs' } }
     ]

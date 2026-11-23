@@ -84,6 +84,9 @@ export const api = {
   announcementAck: (body) => post('/api/announcements/ack', body),
 
   dingtalkLoginUrl: () => get('/api/dingtalk/login-url'),
+  attendanceToday: (force) => get('/api/attendance/today' + (force ? '?force=true' : '')),
+  attendanceRefresh: () => post('/api/attendance/refresh', {}),
+
   dingtalkStatus: () => get('/api/dingtalk/status'),
   dingtalkBind: (body) => post('/api/dingtalk/bind', body),
   dingtalkTest: (body) => post('/api/dingtalk/test', body),

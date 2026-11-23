@@ -29,6 +29,7 @@ public final class Perm {
         ALL.put("logs", "操作日志");
         ALL.put("tools", "工具箱维护（增删改工具卡片）");
         ALL.put("notice", "发布公告");
+        ALL.put("attendance", "考勤看板");
     }
 
     /** 普通用户的默认权限：保持现在能看到的东西 */
