@@ -305,6 +305,36 @@ body {
 
 .content { flex: 1; overflow: auto; padding: 16px 20px 24px; }
 
+/* 整页撑满：表格吃掉剩余高度，分页条贴到页面底部 */
+.fill-page {
+  display: flex; flex-direction: column;
+  height: 100%;
+  min-height: 440px;
+  box-sizing: border-box;
+}
+/* 有 fill-page 的页面：内容区不滚动、去掉底部内边距，
+   否则页面会比可视区高 24px，右侧就冒出一条整页滚动条 */
+.content:has(.fill-page) {
+  overflow: hidden;
+  padding-bottom: 0;
+}
+.fill-page > .panel {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  margin-bottom: 0;
+}
+.fill-page .panel > .el-table {
+  flex: 1; min-height: 0;
+}
+.fill-page .pager {
+  flex: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid #EEF1F5;
+  background: #fff;
+  border-radius: 0 0 6px 6px;
+}
+
 /* ---------- 面板 ---------- */
 .panel {
   background: #fff;

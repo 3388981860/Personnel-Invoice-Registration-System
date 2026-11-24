@@ -69,7 +69,7 @@
           <el-date-picker v-model="month" type="month" value-format="YYYY-MM"
                           :clearable="false" style="width:140px" @change="loadMonth" />
           <el-button size="small" :loading="syncing" @click="syncMonth">同步本月数据</el-button>
-          <el-button size="small" type="primary" plain @click="exportMonth">导出 Excel</el-button>
+          <el-button size="small" type="primary" plain :loading="exporting" @click="exportMonth">导出 Excel</el-button>
           <el-button size="small" @click="openCalendar">工作日设置</el-button>
           <el-button size="small" @click="openExempt">免考勤人员</el-button>
           <el-button size="small" :loading="reminding" @click="sendRemind">发未打卡提醒</el-button>
@@ -192,6 +192,7 @@ const calDays = ref({})
 const holidayList = ref([])
 const holidayJump = ref('')
 const reminding = ref(false)
+const exporting = ref(false)
 const exemptDlg = ref(false)
 const exemptKw = ref('')
 const members = ref([])
@@ -460,8 +461,29 @@ const monthWorkdayCount = computed(() => {
     .filter(d => d.date.startsWith(prefix) && d.is_workday).length
 })
 
-function exportMonth() {
-  window.open(api.attendanceExportUrl(month.value), '_blank')
+async function exportMonth() {
+  // 用 fetch 拿成 blob 再触发下载：不受弹窗拦截影响
+  try {
+    exporting.value = true
+    const res = await fetch(api.attendanceReportUrl(month.value), { credentials: 'include' })
+    if (!res.ok) {
+      throw new Error('导出失败（' + res.status + '）')
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `考勤报表_${month.value}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 3000)
+    ElMessage.success('考勤报表已开始下载')
+  } catch (e) {
+    ElMessage.error(e.message || '导出失败')
+  } finally {
+    exporting.value = false
+  }
 }
 
 onMounted(() => {

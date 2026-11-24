@@ -305,7 +305,7 @@ public class BatchController extends BaseController {
     @PostMapping("/api/batch_status")
     public Map<String, Object> batchStatus(@RequestBody Map<String, Object> body,
                                            HttpServletRequest req) {
-        Map<String, Object> admin = requireAdmin(req);
+        Map<String, Object> admin = requirePerm(req, "review");
         long bid = asLong(body.get("id"), "缺少报销单编号");
         int status = asLong(body.get("status"), "缺少状态") == 0 ? 0 : 1;
         String stamp = java.time.LocalDateTime.now()

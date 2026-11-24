@@ -74,7 +74,7 @@ public class AnnouncementController extends BaseController {
 
     @PostMapping("/api/announcements/save")
     public Map<String, Object> save(@RequestBody Map<String, Object> body, HttpServletRequest req) {
-        Map<String, Object> u = requireUser(req);
+        Map<String, Object> u = requirePerm(req, "notice");
         if (!SessionService.isAdmin(u) && !Perm.has(u, "notice")) {
             throw new ApiException("只有管理员能发布公告", 403);
         }
@@ -157,7 +157,7 @@ public class AnnouncementController extends BaseController {
 
     @PostMapping("/api/announcements/delete")
     public Map<String, Object> delete(@RequestBody Map<String, Object> body, HttpServletRequest req) {
-        Map<String, Object> u = requireUser(req);
+        Map<String, Object> u = requirePerm(req, "notice");
         if (!SessionService.isAdmin(u) && !Perm.has(u, "notice")) {
             throw new ApiException("只有管理员能删公告", 403);
         }

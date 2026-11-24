@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="fill-page">
     <div class="panel">
       <div class="panel-hd">
         <span>{{ isPendingView ? '待审核' : '发票登记' }}</span>
@@ -46,13 +46,13 @@
           <el-option label="未归单" value="none" />
           <el-option v-for="b in batchOptions" :key="b.id" :label="b.batch_no" :value="String(b.id)" />
         </el-select>
-        <el-select v-if="isAdmin" v-model="filters.review" placeholder="全部审核" clearable style="width:120px" @change="reload">
+        <el-select v-if="can('review')" v-model="filters.review" placeholder="全部审核" clearable style="width:120px" @change="reload">
           <el-option label="待审核" value="submitted" />
           <el-option label="已退回" value="returned" />
           <el-option label="已通过" value="approved" />
         </el-select>
-        <el-button @click="reload">刷新</el-button>
-        <el-button v-if="isAdmin" type="primary" :loading="auditChecking" @click="auditClick">
+        <el-button type="primary" @click="reload">查询</el-button>
+        <el-button v-if="can('audit')" type="primary" :loading="auditChecking" @click="auditClick">
           查验
         </el-button>
         <el-button type="primary" plain @click="exportExcel">导出</el-button>
@@ -70,7 +70,7 @@
             （其中 {{ selectedOnOtherPages }} 张在其它页）
           </span>
         </span>
-        <el-button v-if="isAdmin" size="small" @click="startAudit">查验选中</el-button>
+        <el-button v-if="can('audit')" size="small" @click="startAudit">查验选中</el-button>
         <el-button size="small" @click="attachDialog = true">加入报销单</el-button>
         <el-button size="small" @click="detachSelected">从单里拆出</el-button>
         <el-button size="small" link @click="clearSelection">取消选择</el-button>
@@ -87,6 +87,7 @@
         style="width:100%"
         @selection-change="onSelect"
         @row-click="onRowClick"
+        max-height="calc(100vh - 258px)"
       >
         <el-table-column type="selection" width="52" align="center" reserve-selection />
         <el-table-column label="报销单号" width="176">
@@ -128,7 +129,7 @@
         <el-table-column label="报销状态" width="110" align="center">
           <template #default="{ row }">
             <el-switch
-              v-if="isAdmin"
+              v-if="can('review')"
               :model-value="Number(row.status) === 1"
               @update:model-value="(v) => setStatus(row, v)"
             />
@@ -154,7 +155,7 @@
         </el-table-column>
       </el-table>
 
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid #E5E7EB">
+      <div class="pager">
         <span class="text-muted" style="font-size:13px">第 {{ page }} / {{ pageCount }} 页</span>
         <div style="flex:1" />
         <el-select v-model="pageSize" style="width:96px" @change="page = 1">
@@ -217,7 +218,7 @@ import { Lock } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
-import { state, isAdmin, applyStats } from '../store'
+import { state, isAdmin, can, applyStats } from '../store'
 import DetailDrawer from '../components/DetailDrawer.vue'
 
 const route = useRoute()

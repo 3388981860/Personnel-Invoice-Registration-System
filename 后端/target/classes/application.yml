@@ -19,6 +19,11 @@ spring:
   mvc:
     problemdetails:
       enabled: false
+  servlet:
+    multipart:
+      # 合同扫描件经常是整本 PDF，默认 1MB 太小
+      max-file-size: 50MB
+      max-request-size: 60MB
 
 app:
   # 项目根目录（程序/网页/数据 所在的那层），默认是后端的上一级

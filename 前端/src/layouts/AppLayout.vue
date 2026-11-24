@@ -134,7 +134,7 @@ const allGroups = [
       { name: 'attendance', title: '考勤看板', icon: Clock, perm: 'attendance' },
       { name: 'stats', title: '数据总览', icon: DataAnalysis, perm: 'stats' },
       { name: 'users', title: '用户管理', icon: User, perm: 'users' },
-      { name: 'dict', title: '数据字典', icon: Document },
+      { name: 'dict', title: '数据字典', icon: Document, perm: 'dict' },
       { name: 'logs', title: '操作日志', icon: Document, perm: 'logs' }
     ]
   }

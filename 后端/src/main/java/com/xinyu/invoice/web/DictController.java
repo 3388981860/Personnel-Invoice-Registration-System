@@ -55,7 +55,7 @@ public class DictController extends BaseController {
 
     @PostMapping("/api/dict/save")
     public Map<String, Object> save(@RequestBody Map<String, Object> body, HttpServletRequest req) {
-        requireAdmin(req);
+        requirePerm(req, "dict");
         String type = str(body.get("type"));
         String name = str(body.get("name"));
         if (type.isEmpty()) {
@@ -93,7 +93,7 @@ public class DictController extends BaseController {
     @PostMapping("/api/dict/import")
     public Map<String, Object> importFrom(@RequestBody Map<String, Object> body,
                                           HttpServletRequest req) {
-        requireAdmin(req);
+        requirePerm(req, "dict");
         String source = str(body.get("source"));
         List<String> names = new ArrayList<>();
         if ("dingtalk".equals(source)) {
@@ -143,7 +143,7 @@ public class DictController extends BaseController {
 
     @PostMapping("/api/dict/delete")
     public Map<String, Object> delete(@RequestBody Map<String, Object> body, HttpServletRequest req) {
-        requireAdmin(req);
+        requirePerm(req, "dict");
         Object idRaw = body.get("id");
         if (idRaw == null) {
             throw new ApiException("缺少 id");

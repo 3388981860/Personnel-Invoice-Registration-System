@@ -1,5 +1,5 @@
 <template>
-  <div class="page">
+  <div class="page fill-page">
     <div class="panel">
       <div class="panel-head">
         <h2>合同台账</h2>
@@ -45,7 +45,7 @@
       </div>
 
       <el-table :data="pagedProjects" v-loading="loading" size="small" border
-                max-height="calc(100vh - 300px)"
+                max-height="calc(100vh - 232px)"
                 empty-text="还没有项目，点右上角「新建项目」">
         <el-table-column prop="code" label="编号" width="104" />
         <el-table-column label="项目集" width="150" show-overflow-tooltip>
@@ -103,7 +103,6 @@
           :total="projects.length"
           layout="total, sizes, prev, pager, next, jumper"
           background
-          size="small"
         />
       </div>
     </div>
@@ -606,14 +605,23 @@ async function removeContract(c) {
 }
 
 async function upload(id, option) {
+  const file = option.file
+  // 前端先拦一次，别等传到一半才报错
+  if (file.size > 50 * 1024 * 1024) {
+    ElMessage.error(`「${file.name}」有 ${(file.size / 1024 / 1024).toFixed(1)}MB，超过 50MB，请压缩后再传`)
+    return
+  }
   const fd = new FormData()
-  fd.append('file', option.file)
+  fd.append('file', file)
+  const tip = ElMessage({ message: '正在上传…', duration: 0, type: 'info' })
   try {
     await api.contractUpload(id, fd)
-    ElMessage.success('已上传')
+    tip.close()
+    ElMessage.success('已上传，可以点「查看扫描件」预览')
     await openProject(project.value.id)
     drawer.value = true
   } catch (e) {
+    tip.close()
     ElMessage.error(e.message || '上传失败')
   }
 }

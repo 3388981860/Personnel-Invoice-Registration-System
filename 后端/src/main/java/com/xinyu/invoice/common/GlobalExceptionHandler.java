@@ -45,6 +45,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(404).body(body);
     }
 
+    /** 上传文件超过限制：给一句人话，不暴露异常类名 */
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ResponseEntity<Map<String, Object>> onTooLarge(Exception e) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ok", false);
+        body.put("error", "文件太大，单个文件最大 50MB，请压缩后再传");
+        return ResponseEntity.status(413).body(body);
+    }
+
     @ExceptionHandler(DataAccessException.class)
     public ResponseEntity<Map<String, Object>> onDb(DataAccessException e) {
         log.error("数据库错误", e);

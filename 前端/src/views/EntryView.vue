@@ -208,6 +208,9 @@
               <td class="num">{{ money(payTotal) }}</td>
               <td></td>
             </tr>
+            <tr class="upper-row">
+              <td colspan="4">人民币（大写）：<b>{{ moneyUpper(payTotal) }}</b></td>
+            </tr>
           </tbody>
         </table>
 
@@ -231,6 +234,9 @@
               <td colspan="3">合计</td>
               <td class="num">{{ money(total) }}</td>
               <td></td>
+            </tr>
+            <tr class="upper-row">
+              <td colspan="5">人民币（大写）：<b>{{ moneyUpper(total) }}</b></td>
             </tr>
           </tbody>
         </table>
@@ -358,7 +364,7 @@ function onDrop(e) {
 }
 
 function addRow() {
-  items.value.push({ invoice_no: '', invoice_date: '', amount: '', seller: '', token: '', _dup: false, _warn: '' })
+  items.value.push({ invoice_no: '', invoice_date: '', amount: '', seller: '', category: '', token: '', _dup: false, _warn: '' })
 }
 
 async function uploadFiles(files) {
@@ -378,6 +384,7 @@ async function uploadFiles(files) {
         invoice_date: f.invoice_date || '',
         amount: f.amount || '',
         seller: f.seller || '',
+        category: f.category || '',
         token: r.token || '',
         _dup: dup,
         _warn: dup ? '' : ''
@@ -394,6 +401,45 @@ async function uploadFiles(files) {
 }
 
 /** 当前登录的人，作为报销人默认值 */
+/** 金额转人民币大写，例：1234.56 → 壹仟贰佰叁拾肆元伍角陆分 */
+function moneyUpper(v) {
+  const raw = Number(v || 0)
+  if (isNaN(raw)) return ''
+  const neg = raw < 0
+  const cents = Math.round(Math.abs(raw) * 100)   // 以「分」为单位，避开浮点误差
+  const digit = ['零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖']
+  const unit0 = ['元', '万', '亿']
+  const unit1 = ['', '拾', '佰', '仟']
+
+  const jiao = Math.floor(cents / 10) % 10
+  const fen = cents % 10
+  let n = Math.floor(cents / 100)
+
+  // 整数部分
+  let s = ''
+  for (let i = 0; i < unit0.length && n > 0; i++) {
+    let p = ''
+    for (let j = 0; j < unit1.length && n > 0; j++) {
+      p = digit[n % 10] + unit1[j] + p
+      n = Math.floor(n / 10)
+    }
+    s = p.replace(/(零.)*零$/, '').replace(/^$/, '零') + unit0[i] + s
+  }
+  s = s.replace(/(零.)*零元/, '元').replace(/(零.)+/g, '零')
+  if (!s) s = '零元'
+
+  // 角分
+  let tail = ''
+  if (jiao === 0 && fen === 0) {
+    tail = '整'
+  } else if (jiao === 0) {
+    tail = '零' + digit[fen] + '分'
+  } else {
+    tail = digit[jiao] + '角' + (fen > 0 ? digit[fen] + '分' : '整')
+  }
+  return (neg ? '负' : '') + s + tail
+}
+
 function meName() {
   return String(state.me?.display_name || state.me?.username || '').trim()
 }
@@ -466,6 +512,10 @@ async function submit() {
 </script>
 
 <style scoped>
+.upper-row td {
+  background: #FAFBFC; font-size: 12px; color: #4B5563; letter-spacing: 1px;
+}
+.upper-row b { color: #1F2937; font-weight: 600; }
 .paper { background: #fff; padding: 8px 6px 4px; font-size: 13px; color: #1F2937; }
 .paper-hd { text-align: center; margin-bottom: 14px; }
 .paper-title { font-size: 20px; font-weight: 600; letter-spacing: 6px; }

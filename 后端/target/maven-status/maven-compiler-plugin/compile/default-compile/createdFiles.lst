@@ -5,6 +5,7 @@ com\xinyu\invoice\InvoiceApplication.class
 com\xinyu\invoice\web\ToolController.class
 com\xinyu\invoice\auth\SessionService.class
 com\xinyu\invoice\service\AttendanceMonthService.class
+com\xinyu\invoice\web\AttendanceReportController.class
 com\xinyu\invoice\common\GlobalExceptionHandler.class
 com\xinyu\invoice\web\FileController.class
 com\xinyu\invoice\web\AttendanceController.class
@@ -37,9 +38,11 @@ com\xinyu\invoice\service\ExcelExportService$Col.class
 com\xinyu\invoice\web\InvoiceWriteController.class
 com\xinyu\invoice\service\AttendanceService.class
 com\xinyu\invoice\repo\ContractRepo.class
+com\xinyu\invoice\web\AttendanceReportController$Styles.class
 com\xinyu\invoice\web\ContractExportController.class
 com\xinyu\invoice\service\DingTalkService.class
 com\xinyu\invoice\web\EntryController.class
+com\xinyu\invoice\service\AttendanceAutoSyncService.class
 com\xinyu\invoice\web\NotificationController.class
 com\xinyu\invoice\service\ParseService.class
 com\xinyu\invoice\web\AuditController.class

@@ -18,7 +18,7 @@ const routes = [
       { path: 'attendance', name: 'attendance', component: () => import('./views/AttendanceView.vue'), meta: { title: '考勤看板', group: '管理', perm: 'attendance' } },
   { path: 'stats', name: 'stats', component: () => import('./views/StatsView.vue'), meta: { title: '数据总览', group: '管理', perm: 'stats' } },
       { path: 'users', name: 'users', component: () => import('./views/UsersView.vue'), meta: { title: '用户管理', group: '管理', perm: 'users' } },
-      { path: 'dict', name: 'dict', component: () => import('./views/DictView.vue'), meta: { title: '数据字典', group: '管理', admin: true } },
+      { path: 'dict', name: 'dict', component: () => import('./views/DictView.vue'), meta: { title: '数据字典', group: '管理', perm: 'dict' } },
   { path: 'logs', name: 'logs', component: () => import('./views/LogsView.vue'), meta: { title: '操作日志', group: '管理', perm: 'logs' } }
     ]
   }

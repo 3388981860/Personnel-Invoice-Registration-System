@@ -64,7 +64,7 @@ public class InvoiceWriteController extends BaseController {
     @PostMapping("/api/status")
     public Map<String, Object> status(@RequestBody Map<String, Object> body,
                                       HttpServletRequest req) {
-        Map<String, Object> admin = requireAdmin(req);
+        Map<String, Object> admin = requirePerm(req, "review");
         long id = asLong(body.get("id"), "缺少记录编号");
         Map<String, Object> rec = invoices.get(id);
         if (rec == null) {

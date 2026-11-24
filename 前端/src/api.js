@@ -90,6 +90,7 @@ export const api = {
   attendanceSyncMonth: (body) => post('/api/attendance/sync-month', body),
   attendanceProgress: (m) => get('/api/attendance/progress?month=' + m),
   attendanceExportUrl: (m) => '/api/attendance/export?month=' + m,
+  attendanceReportUrl: (m) => '/api/attendance/export-report?month=' + m,
   attendanceCalendar: (m) => get('/api/attendance/calendar?month=' + m),
   attendanceCalendarSet: (body) => post('/api/attendance/calendar/set', body),
   attendanceCalendarSync: (body) => post('/api/attendance/calendar/sync', body),

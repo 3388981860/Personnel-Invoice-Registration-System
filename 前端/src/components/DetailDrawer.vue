@@ -41,6 +41,8 @@
           <el-descriptions-item label="报销人">{{ batch.person || '—' }}</el-descriptions-item>
           <el-descriptions-item label="收款人">{{ batch.payee || '—' }}</el-descriptions-item>
           <el-descriptions-item label="报销日期">{{ batch.reimburse_date || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="报销部门">{{ batch.dept_name || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="报销项目">{{ batch.project_name || '—' }}</el-descriptions-item>
           <el-descriptions-item label="报销状态">
             <el-tag size="small" :type="Number(batch.status) === 1 ? 'success' : 'danger'">
               {{ Number(batch.status) === 1 ? '已报销' : '未报销' }}
@@ -159,7 +161,7 @@
         <div class="sec sec-with-btn">
           查验
           <el-button
-            v-if="isAdmin"
+            v-if="can('audit')"
             size="small"
             type="primary"
             plain
@@ -201,21 +203,21 @@
     <template v-if="type === 'batch' && batch" #footer>
       <div class="drawer-foot">
         <el-button
-          v-if="isAdmin"
+          v-if="can('audit')"
           :loading="auditing"
           :disabled="auditing"
           @click="auditBatch"
         >查验本单</el-button>
         <el-button
-          v-if="isAdmin && batch?.review_status !== 'approved'"
+          v-if="can('review') && batch?.review_status !== 'approved'"
           type="danger" plain @click="startReturn"
         >{{ isMyOwnSubmit ? '修改' : '退回修改' }}</el-button>
         <el-button
-          v-if="isAdmin && batch?.review_status !== 'approved'"
+          v-if="can('review') && batch?.review_status !== 'approved'"
           type="primary" @click="review('approve')"
         >审核通过</el-button>
         <el-button
-          v-if="isAdmin && batch?.review_status === 'approved'"
+          v-if="can('review') && batch?.review_status === 'approved'"
           @click="toggleBatchStatus"
         >{{ Number(batch?.status) === 1 ? '改回未报销' : '整单标记已报销' }}</el-button>
         <el-button
@@ -371,7 +373,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
-import { state, isAdmin } from '../store'
+import { state, isAdmin, can } from '../store'
 
 const props = defineProps({
   modelValue: Boolean,

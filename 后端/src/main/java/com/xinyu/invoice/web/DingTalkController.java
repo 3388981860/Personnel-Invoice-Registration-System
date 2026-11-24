@@ -30,7 +30,7 @@ public class DingTalkController extends BaseController {
 
     @GetMapping("/api/dingtalk/status")
     public Map<String, Object> status(HttpServletRequest req) {
-        requireAdmin(req);
+        requirePerm(req, "users");
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ok", true);
         out.put("configured", ding.configured());
@@ -58,7 +58,7 @@ public class DingTalkController extends BaseController {
     /** 把系统账号和钉钉账号绑起来 */
     @PostMapping("/api/dingtalk/bind")
     public Map<String, Object> bind(@RequestBody Map<String, Object> body, HttpServletRequest req) {
-        requireAdmin(req);
+        requirePerm(req, "users");
         Object uidRaw = body.get("user_id");
         if (uidRaw == null) {
             throw new ApiException("缺少 user_id");
@@ -82,7 +82,7 @@ public class DingTalkController extends BaseController {
     /** 给某个人试发一条，确认链路通 */
     @PostMapping("/api/dingtalk/test")
     public Map<String, Object> test(@RequestBody Map<String, Object> body, HttpServletRequest req) {
-        Map<String, Object> me = requireAdmin(req);
+        Map<String, Object> me = requirePerm(req, "users");
         long userId = body.get("user_id") == null
                 ? uid(me) : Long.parseLong(String.valueOf(body.get("user_id")));
         String dt = ding.dingtalkIdOf(userId);

@@ -26,7 +26,7 @@ public class UserController extends BaseController {
     /** 从钉钉通讯录同步所有人的部门 */
     @PostMapping("/api/users/sync-dept")
     public Map<String, Object> syncDept(HttpServletRequest req) {
-        requireAdmin(req);
+        requirePerm(req, "users");
         try {
             java.util.Map<String, java.util.List<String>> names = dingTalk.deptMapByUser();
             java.util.Map<String, java.util.List<Long>> ids = dingTalk.deptIdsByUser();
@@ -63,7 +63,7 @@ public class UserController extends BaseController {
     /** 组织架构树（钉钉部门 + 每个部门有多少人） */
     @GetMapping("/api/users/org")
     public Map<String, Object> org(HttpServletRequest req) {
-        requireAdmin(req);
+        requirePerm(req, "users");
         java.util.List<Map<String, Object>> flat;
         try {
             flat = dingTalk.deptTree();
@@ -128,10 +128,7 @@ public class UserController extends BaseController {
 
     @GetMapping("/api/users")
     public Map<String, Object> list(HttpServletRequest req) {
-        Map<String, Object> me = requireUser(req);
-        if (!com.xinyu.invoice.auth.SessionService.isAdmin(me)) {
-            throw new ApiException("这个操作需要管理员权限", 403);
-        }
+        requirePerm(req, "users");
         List<Map<String, Object>> users = new ArrayList<>();
         for (Map<String, Object> u : jdbc.queryForList(
                 "SELECT * FROM users ORDER BY id")) {
@@ -158,7 +155,7 @@ one.put("perms", com.xinyu.invoice.auth.Perm.of(u));
     @PostMapping("/api/users/create")
     public Map<String, Object> create(@RequestBody Map<String, Object> body,
                                       HttpServletRequest req) {
-        Map<String, Object> admin = requireAdmin(req);
+        Map<String, Object> admin = requirePerm(req, "users");
         String username = str(body.get("username")).strip();
         String password = str(body.get("password"));
         boolean generated = password.isBlank();
@@ -210,7 +207,7 @@ one.put("perms", com.xinyu.invoice.auth.Perm.of(u));
     @PostMapping("/api/users/update")
     public Map<String, Object> update(@RequestBody Map<String, Object> body,
                                       HttpServletRequest req) {
-        Map<String, Object> admin = requireAdmin(req);
+        Map<String, Object> admin = requirePerm(req, "users");
         long uid = asLong(body.get("id"), "缺少用户编号");
         Map<String, Object> target = jdbc.queryForList(
                 "SELECT * FROM users WHERE id = ?", uid).stream().findFirst().orElse(null);

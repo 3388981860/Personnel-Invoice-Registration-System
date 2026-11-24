@@ -52,7 +52,7 @@ public class ToolController extends BaseController {
     /** 新增或修改：有管理权限的人才能改 */
     @PostMapping("/api/tools/save")
     public Map<String, Object> save(@RequestBody Map<String, Object> body, HttpServletRequest req) {
-        Map<String, Object> u = requireUser(req);
+        Map<String, Object> u = requirePerm(req, "tools");
         if (!canEdit(u)) {
             throw new ApiException("只有管理员能改工具箱", 403);
         }
@@ -83,7 +83,7 @@ public class ToolController extends BaseController {
 
     @PostMapping("/api/tools/delete")
     public Map<String, Object> delete(@RequestBody Map<String, Object> body, HttpServletRequest req) {
-        Map<String, Object> u = requireUser(req);
+        Map<String, Object> u = requirePerm(req, "tools");
         if (!canEdit(u)) {
             throw new ApiException("只有管理员能改工具箱", 403);
         }
