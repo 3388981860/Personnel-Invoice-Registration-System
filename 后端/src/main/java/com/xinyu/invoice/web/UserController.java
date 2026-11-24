@@ -60,6 +60,83 @@ public class UserController extends BaseController {
         }
     }
 
+    /** 把钉钉通讯录里的人全部建成系统账号（已存在的只补部门和绑定） */
+    @PostMapping("/api/users/import-dingtalk")
+    public Map<String, Object> importDingTalk(HttpServletRequest req) {
+        requirePerm(req, "users");
+        java.util.List<Map<String, Object>> members;
+        java.util.Map<String, java.util.List<String>> deptMap;
+        try {
+            members = dingTalk.directory();
+            deptMap = dingTalk.deptMapByUser();
+        } catch (Exception e) {
+            throw new ApiException("读钉钉通讯录失败：" + e.getMessage(), 500);
+        }
+
+        int created = 0, bound = 0, updated = 0, skipped = 0;
+        String now = java.time.LocalDateTime.now().format(TS);
+        for (Map<String, Object> m : members) {
+            String dtId = m.get("userid") == null ? "" : String.valueOf(m.get("userid")).trim();
+            String name = m.get("name") == null ? "" : String.valueOf(m.get("name")).trim();
+            String mobile = m.get("mobile") == null ? "" : String.valueOf(m.get("mobile")).trim();
+            if (dtId.isEmpty() || name.isEmpty()) {
+                skipped++;
+                continue;
+            }
+            String dept = String.join("、", deptMap.getOrDefault(dtId, java.util.List.of()));
+
+            // ① 已经绑过这个钉钉 id
+            java.util.List<Map<String, Object>> byDt = jdbc.queryForList(
+                    "SELECT id FROM users WHERE dingtalk_userid = ?", dtId);
+            if (!byDt.isEmpty()) {
+                jdbc.update("UPDATE users SET dept_name = ?, display_name = COALESCE(NULLIF(display_name,''), ?)"
+                        + " WHERE id = ?", dept, name, byDt.get(0).get("id"));
+                updated++;
+                continue;
+            }
+
+            // ② 有同名/同手机号的账号：把钉钉绑上去
+            java.util.List<Map<String, Object>> byMobile = mobile.isEmpty()
+                    ? new java.util.ArrayList<>()
+                    : jdbc.queryForList("SELECT id FROM users WHERE username = ?", mobile);
+            java.util.List<Map<String, Object>> byName = jdbc.queryForList(
+                    "SELECT id FROM users WHERE display_name = ?", name);
+            java.util.List<Map<String, Object>> hit = !byMobile.isEmpty() ? byMobile : byName;
+            if (!hit.isEmpty()) {
+                jdbc.update("UPDATE users SET dingtalk_userid = ?, dept_name = ? WHERE id = ?",
+                        dtId, dept, hit.get(0).get("id"));
+                bound++;
+                continue;
+            }
+
+            // ③ 新建：用户名用手机号，没手机号就用钉钉 id
+            String username = mobile.isEmpty() ? dtId : mobile;
+            if (!jdbc.queryForList("SELECT id FROM users WHERE username = ?", username).isEmpty()) {
+                username = dtId;
+            }
+            String pwd = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+            jdbc.update("INSERT INTO users (username, password_hash, display_name, role, status,"
+                            + " must_change_pw, perms, dingtalk_userid, dept_name, created_at)"
+                            + " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    username,
+                    com.xinyu.invoice.auth.PasswordTool.hash(pwd),
+                    name, "user", 1, 1,
+                    com.xinyu.invoice.auth.Perm.serialize(
+                            new java.util.ArrayList<>(com.xinyu.invoice.auth.Perm.DEFAULT)),
+                    dtId, dept, now);
+            created++;
+        }
+
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("ok", true);
+        out.put("total", members.size());
+        out.put("created", created);
+        out.put("bound", bound);
+        out.put("updated", updated);
+        out.put("skipped", skipped);
+        return out;
+    }
+
     /** 组织架构树（钉钉部门 + 每个部门有多少人） */
     @GetMapping("/api/users/org")
     public Map<String, Object> org(HttpServletRequest req) {

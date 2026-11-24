@@ -53,11 +53,14 @@ public class AttendanceReportController extends BaseController {
 
     private final WorkdayCalendarService calendar;
     private final AttendanceService attendanceSvc;
+    private final com.xinyu.invoice.service.DingTalkService ding;
 
     public AttendanceReportController(WorkdayCalendarService calendar,
-                                      AttendanceService attendanceSvc) {
+                                      AttendanceService attendanceSvc,
+                                      com.xinyu.invoice.service.DingTalkService ding) {
         this.calendar = calendar;
         this.attendanceSvc = attendanceSvc;
+        this.ding = ding;
     }
 
     @GetMapping("/api/attendance/export-report")
@@ -92,21 +95,41 @@ public class AttendanceReportController extends BaseController {
             daily.put(str(r.get("dt_userid")) + "|" + str(r.get("work_date")), r);
         }
 
-        // 人员：在用账号 + 部门 + 钉钉 id
+        // 人员：优先用钉钉通讯录全员（没注册的也在），拿不到再退回系统账号
         Set<String> exempt = attendanceSvc.exemptIds();
         List<Map<String, Object>> people = new ArrayList<>();
-        for (Map<String, Object> u : jdbc.queryForList(
-                "SELECT id, username, display_name, dept_name, dingtalk_userid FROM users"
-                        + " WHERE status = 1 ORDER BY COALESCE(dept_name,'zz'), display_name")) {
-            String dtId = u.get("dingtalk_userid") == null
-                    ? "" : String.valueOf(u.get("dingtalk_userid"));
-            if (!dtId.isEmpty() && exempt.contains(dtId)) {
-                continue;                       // 免考勤的人不进报表
+        try {
+            Map<String, List<String>> deptMap = ding.deptMapByUser();
+            for (Map<String, Object> m : ding.directory()) {
+                String dtId = str(m.get("userid"));
+                if (dtId.isEmpty() || exempt.contains(dtId)) {
+                    continue;
+                }
+                Map<String, Object> one = new LinkedHashMap<>();
+                one.put("display_name", str(m.get("name")));
+                one.put("dept_name", String.join("、",
+                        deptMap.getOrDefault(dtId, new ArrayList<>())));
+                one.put("dingtalk_userid", dtId);
+                people.add(one);
             }
-            if (dtId.isEmpty() && !hasAnyRecord(daily, str(u.get("display_name")))) {
-                continue;                       // 没绑定钉钉、也没考勤数据的（比如测试账号）跳过
+            people.sort((a, b) -> {
+                int c = str(a.get("dept_name")).compareTo(str(b.get("dept_name")));
+                return c != 0 ? c : str(a.get("display_name")).compareTo(str(b.get("display_name")));
+            });
+        } catch (Exception e) {
+            for (Map<String, Object> u : jdbc.queryForList(
+                    "SELECT id, username, display_name, dept_name, dingtalk_userid FROM users"
+                            + " WHERE status = 1 ORDER BY COALESCE(dept_name,'zz'), display_name")) {
+                String dtId = u.get("dingtalk_userid") == null
+                        ? "" : String.valueOf(u.get("dingtalk_userid"));
+                if (!dtId.isEmpty() && exempt.contains(dtId)) {
+                    continue;
+                }
+                if (dtId.isEmpty() && !hasAnyRecord(daily, str(u.get("display_name")))) {
+                    continue;
+                }
+                people.add(u);
             }
-            people.add(u);
         }
 
         try (XSSFWorkbook wb = new XSSFWorkbook();

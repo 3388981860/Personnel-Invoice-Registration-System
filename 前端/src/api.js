@@ -101,6 +101,7 @@ export const api = {
   dictDelete: (body) => post('/api/dict/delete', body),
   syncUserDept: () => post('/api/users/sync-dept', {}),
   userOrg: () => get('/api/users/org'),
+  importDingUsers: () => post('/api/users/import-dingtalk', {}),
 
   attendanceExempt: () => get('/api/attendance/exempt'),
   attendanceExemptSet: (body) => post('/api/attendance/exempt/set', body),

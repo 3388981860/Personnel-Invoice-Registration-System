@@ -33,6 +33,9 @@
           style="width:220px;margin-left:auto"
           :prefix-icon="Search"
         />
+        <el-button size="small" :loading="importing" @click="importDing">
+          导入钉钉人员
+        </el-button>
         <el-button size="small" :loading="syncing" @click="syncDept">
           同步部门
         </el-button>
@@ -315,6 +318,30 @@ async function savePerm() {
 }
 
 const syncing = ref(false)
+const importing = ref(false)
+
+/** 把钉钉通讯录里的人全部建成系统账号 */
+async function importDing() {
+  try {
+    await ElMessageBox.confirm(
+      '会把钉钉通讯录里还没账号的人建成系统账号（用户名用手机号，初始密码随机，可扫码登录）。继续？',
+      '导入钉钉人员', { type: 'info' })
+  } catch (e) {
+    return
+  }
+  importing.value = true
+  try {
+    const r = await api.importDingUsers()
+    ElMessage.success(
+      `通讯录共 ${r.total} 人：新建 ${r.created}，补绑定 ${r.bound}，更新 ${r.updated}，跳过 ${r.skipped}`)
+    await load()
+    await loadOrg()
+  } catch (e) {
+    ElMessage.error(e.message || '导入失败')
+  } finally {
+    importing.value = false
+  }
+}
 const treeData = ref([])
 const currentDeptId = ref('all')
 const currentDeptName = ref('全部')
