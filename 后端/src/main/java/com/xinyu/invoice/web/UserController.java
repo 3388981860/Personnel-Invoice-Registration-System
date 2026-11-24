@@ -66,12 +66,29 @@ public class UserController extends BaseController {
         requirePerm(req, "users");
         java.util.List<Map<String, Object>> members;
         java.util.Map<String, java.util.List<String>> deptMap;
+        java.util.Map<String, java.util.List<Long>> deptIdMap;
         try {
             members = dingTalk.directory();
             deptMap = dingTalk.deptMapByUser();
+            deptIdMap = dingTalk.deptIdsByUser();
         } catch (Exception e) {
             throw new ApiException("读钉钉通讯录失败：" + e.getMessage(), 500);
         }
+
+        java.util.function.Function<String, String> idStr = dtId -> {
+            java.util.List<Long> ids = deptIdMap.get(dtId);
+            if (ids == null || ids.isEmpty()) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder();
+            for (Long d : ids) {
+                if (sb.length() > 0) {
+                    sb.append(",");
+                }
+                sb.append(d);
+            }
+            return sb.toString();
+        };
 
         int created = 0, bound = 0, updated = 0, skipped = 0;
         String now = java.time.LocalDateTime.now().format(TS);
@@ -89,8 +106,9 @@ public class UserController extends BaseController {
             java.util.List<Map<String, Object>> byDt = jdbc.queryForList(
                     "SELECT id FROM users WHERE dingtalk_userid = ?", dtId);
             if (!byDt.isEmpty()) {
-                jdbc.update("UPDATE users SET dept_name = ?, display_name = COALESCE(NULLIF(display_name,''), ?)"
-                        + " WHERE id = ?", dept, name, byDt.get(0).get("id"));
+                jdbc.update("UPDATE users SET dept_name = ?, dept_ids = ?,"
+                                + " display_name = COALESCE(NULLIF(display_name,''), ?) WHERE id = ?",
+                        dept, idStr.apply(dtId), name, byDt.get(0).get("id"));
                 updated++;
                 continue;
             }
@@ -103,8 +121,9 @@ public class UserController extends BaseController {
                     "SELECT id FROM users WHERE display_name = ?", name);
             java.util.List<Map<String, Object>> hit = !byMobile.isEmpty() ? byMobile : byName;
             if (!hit.isEmpty()) {
-                jdbc.update("UPDATE users SET dingtalk_userid = ?, dept_name = ? WHERE id = ?",
-                        dtId, dept, hit.get(0).get("id"));
+                jdbc.update("UPDATE users SET dingtalk_userid = ?, dept_name = ?, dept_ids = ?"
+                                + " WHERE id = ?",
+                        dtId, dept, idStr.apply(dtId), hit.get(0).get("id"));
                 bound++;
                 continue;
             }
@@ -116,14 +135,14 @@ public class UserController extends BaseController {
             }
             String pwd = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
             jdbc.update("INSERT INTO users (username, password_hash, display_name, role, status,"
-                            + " must_change_pw, perms, dingtalk_userid, dept_name, created_at)"
-                            + " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            + " must_change_pw, perms, dingtalk_userid, dept_name, dept_ids,"
+                            + " created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     username,
                     com.xinyu.invoice.auth.PasswordTool.hash(pwd),
                     name, "user", 1, 1,
                     com.xinyu.invoice.auth.Perm.serialize(
                             new java.util.ArrayList<>(com.xinyu.invoice.auth.Perm.DEFAULT)),
-                    dtId, dept, now);
+                    dtId, dept, idStr.apply(dtId), now);
             created++;
         }
 

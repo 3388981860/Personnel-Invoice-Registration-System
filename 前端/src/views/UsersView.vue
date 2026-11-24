@@ -381,16 +381,43 @@ function findNode(nodes, id) {
   return null
 }
 
+/** 这个人的部门名里有没有当前部门（含子部门） */
+function nameMatches(u, node) {
+  const names = String(u.dept_name || '')
+  if (!names) return false
+  const want = []
+  const walk = n => {
+    if (typeof n.id === 'number' && n.name) want.push(n.name)
+    ;(n.children || []).forEach(walk)
+  }
+  walk(node)
+  return want.some(n => names.includes(n))
+}
+
+/** 有没有出现在任何部门下 */
+function matchedAnyName(u) {
+  return treeData.value.slice(1).some(n => n.id !== 'none' && nameMatches(u, n))
+}
+
 function inCurrentDept(u) {
   if (currentDeptId.value === 'all') return true
   const ids = String(u.dept_ids || '')
-  if (currentDeptId.value === 'none') return !ids.trim()
   const node = findNode(treeData.value, currentDeptId.value)
+
+  if (currentDeptId.value === 'none') {
+    // 既没有部门 id，也匹配不到任何部门名 → 才叫未分配
+    return !ids.trim() && !matchedAnyName(u)
+  }
   if (!node) return true
-  const want = collectIds(node)
-  const mine = ids.split(',').map(s => Number(s.trim())).filter(Boolean)
-  return mine.some(x => want.includes(x))
+
+  if (ids.trim()) {
+    const want = collectIds(node)
+    const mine = ids.split(',').map(s => Number(s.trim())).filter(Boolean)
+    if (mine.some(x => want.includes(x))) return true
+  }
+  return nameMatches(u, node)
 }
+
 
 const kw = ref('')
 
