@@ -264,11 +264,12 @@ public class ContractRepo {
         Object id = b.get("id");
         if (id instanceof Number n) {
             jdbc.update("UPDATE contracts SET kind=?, party_a=?, party_b=?, contract_no=?, "
-                            + "amount=?, signed=?, signed_at=?, note=?, updated_at=? WHERE id=?",
+                            + "amount=?, signed=?, signed_at=?, note=?, customer_id=?,"
+                            + " updated_at=? WHERE id=?",
                     kind, blank(b.get("party_a")), blank(b.get("party_b")),
                     blank(b.get("contract_no")), number(b.get("amount")),
                     blank(b.get("signed")), blank(b.get("signed_at")),
-                    blank(b.get("note")), now, n.longValue());
+                    blank(b.get("note")), asLongOrNull(b.get("customer_id")), now, n.longValue());
             return n.longValue();
         }
         jdbc.update("INSERT INTO contracts (project_id, kind, party_a, party_b, contract_no, "
@@ -371,6 +372,18 @@ public class ContractRepo {
         try {
             return round(Double.parseDouble(
                     String.valueOf(v).replace(",", "").replace("¥", "").strip()));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** 可空的 id：空串/null 返回 null */
+    public static Long asLongOrNull(Object o) {
+        if (o == null || String.valueOf(o).isBlank() || "null".equals(String.valueOf(o))) {
+            return null;
+        }
+        try {
+            return Long.parseLong(String.valueOf(o).trim());
         } catch (NumberFormatException e) {
             return null;
         }

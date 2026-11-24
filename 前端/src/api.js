@@ -175,6 +175,23 @@ export const api = {
   // ---- 合同管理 ----
   projects: (query) => get('/api/projects', query),
   projectSets: () => get('/api/project_sets'),
+
+  // 客户档案
+  customers: (query) => get('/api/customers', query),
+  customerSave: (body) => post('/api/customer/save', body),
+  customerDelete: (body) => post('/api/customer/delete', body),
+
+  // 开票申请
+  invoiceRequests: (query) => get('/api/invoice_requests', query),
+  invoiceRequest: (id) => get('/api/invoice_request', { id }),
+  invoiceRequestSave: (body) => post('/api/invoice_request/save', body),
+  invoiceRequestSign: (body) => post('/api/invoice_request/sign', body),
+  invoiceRequestSubmit: (body) => post('/api/invoice_request/submit', body),
+  invoiceRequestReview: (body) => post('/api/invoice_request/review', body),
+  invoiceRequestDelete: (body) => post('/api/invoice_request/delete', body),
+  invoiceRequestMarkInvoiced: (body) => post('/api/invoice_request/mark_invoiced', body),
+
+  dingtalkPicker: () => get('/api/dingtalk/picker'),
   projectSetSave: (body) => post('/api/project_set/save', body),
   project: (id) => get('/api/project', { id }),
   saveProject: (payload) => post('/api/project/save', payload),

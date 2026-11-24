@@ -4,6 +4,9 @@ import { setUnauthorizedHandler } from './api'
 
 const routes = [
   { path: '/login', name: 'login', component: () => import('./views/LoginView.vue'), meta: { public: true } },
+  { path: '/invoice-print/:id', name: 'invoice-print',
+    component: () => import('./views/InvoicePrintView.vue'),
+    meta: { title: '开票申请单打印' } },
   {
     path: '/',
     component: () => import('./layouts/AppLayout.vue'),
@@ -14,6 +17,7 @@ const routes = [
       { path: 'pending', name: 'pending', component: () => import('./views/LedgerView.vue'), meta: { title: '待审核', group: '业务', perm: 'review', review: 'submitted' } },
         { path: 'notice', name: 'notice', component: () => import('./views/NoticeView.vue'), meta: { title: '公告', group: '业务' } },
   { path: 'tools', name: 'tools', component: () => import('./views/ToolsView.vue'), meta: { title: '工具箱', group: '业务' } },
+  { path: 'invoice-requests', name: 'invoice-requests', component: () => import('./views/InvoiceRequestsView.vue'), meta: { title: '开票申请', group: '业务', perm: 'contracts' } },
   { path: 'contracts', name: 'contracts', component: () => import('./views/ContractsView.vue'), meta: { title: '合同台账', group: '业务', perm: 'contracts' } },
       { path: 'attendance', name: 'attendance', component: () => import('./views/AttendanceView.vue'), meta: { title: '考勤看板', group: '管理', perm: 'attendance' } },
   { path: 'stats', name: 'stats', component: () => import('./views/StatsView.vue'), meta: { title: '数据总览', group: '管理', perm: 'stats' } },

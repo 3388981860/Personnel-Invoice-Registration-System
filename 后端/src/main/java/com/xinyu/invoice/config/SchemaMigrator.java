@@ -191,6 +191,61 @@ public class SchemaMigrator implements ApplicationRunner {
             log.info("users 表已补 dingtalk_union_id 列");
         }
 
+        // 客户档案：单位全称、税号、开户行、账号（开票申请要用）
+        jdbc.execute("CREATE TABLE IF NOT EXISTS customers ("
+                + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + "name TEXT NOT NULL,"
+                + "tax_no TEXT,"
+                + "bank TEXT,"
+                + "account TEXT,"
+                + "contact TEXT,"
+                + "phone TEXT,"
+                + "note TEXT,"
+                + "created_at TEXT)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name)");
+        try {
+            jdbc.queryForList("SELECT customer_id FROM contracts LIMIT 1");
+        } catch (Exception e) {
+            jdbc.execute("ALTER TABLE contracts ADD COLUMN customer_id INTEGER");
+            log.info("contracts 表已补 customer_id 列");
+        }
+
+        // 开票申请单：一张单对应一次开票申请，走审核流程
+        jdbc.execute("CREATE TABLE IF NOT EXISTS invoice_requests ("
+                + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + "no TEXT,"                        // KP-2026-001
+                + "contract_id INTEGER,"
+                + "project_id INTEGER,"
+                + "customer_id INTEGER,"
+                + "buyer_name TEXT,"                // 单位全称
+                + "buyer_tax_no TEXT,"              // 企业税号
+                + "amount REAL,"                    // 开票金额
+                + "content TEXT,"                   // 开票内容
+                + "note TEXT,"                      // 备注
+                + "inv_type TEXT,"                  // 专用发票 / 普通发票
+                + "dept TEXT,"                      // 市场部 / 技术部
+                + "bank TEXT,"                      // 收款银行
+                + "applicant_id INTEGER,"
+                + "applicant_name TEXT,"
+                + "agent_name TEXT,"                // 代办人
+                + "sign_rel TEXT,"                  // 手写签名图（相对路径）
+                + "sign_at TEXT,"
+                + "status TEXT DEFAULT 'draft',"    // draft/submitted/approved/returned
+                + "reviewer_id INTEGER,"
+                + "reviewed_at TEXT,"
+                + "review_note TEXT,"
+                + "created_at TEXT,"
+                + "updated_at TEXT)");
+        try {
+            jdbc.queryForList("SELECT billing_id FROM invoice_requests LIMIT 1");
+        } catch (Exception e) {
+            jdbc.execute("ALTER TABLE invoice_requests ADD COLUMN billing_id INTEGER");
+            jdbc.execute("ALTER TABLE invoice_requests ADD COLUMN invoiced_at TEXT");
+            log.info("invoice_requests 已补 billing_id / invoiced_at");
+        }
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_invreq_status ON invoice_requests(status)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_invreq_contract ON invoice_requests(contract_id)");
+
         // 项目集（program）：一批项目归到一个集下
         jdbc.execute("CREATE TABLE IF NOT EXISTS project_sets ("
                 + "id INTEGER PRIMARY KEY AUTOINCREMENT,"

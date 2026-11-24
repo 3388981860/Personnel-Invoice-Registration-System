@@ -28,6 +28,56 @@ public class DingTalkController extends BaseController {
         this.ding = ding;
     }
 
+    // 部门 + 成员缓存，避免每次开表单都去拉一遍通讯录
+    private static java.util.List<String> pickerDepts = null;
+    private static java.util.List<Map<String, Object>> pickerMembers = null;
+    private static long pickerAt = 0L;
+
+    /**
+     * 下拉选项：钉钉部门 + 钉钉成员。
+     *
+     * 开票申请这类表单只要有合同权限就能用，不该要求 users 权限，
+     * 所以单独开一个轻量接口。
+     */
+    @GetMapping("/api/dingtalk/picker")
+    public Map<String, Object> picker(HttpServletRequest req) {
+        requirePerm(req, "contracts");
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ok", true);
+        out.put("configured", ding.configured());
+        if (!ding.configured()) {
+            out.put("departments", java.util.List.of());
+            out.put("members", java.util.List.of());
+            out.put("error", "服务端还没配置钉钉密钥");
+            return out;
+        }
+        // 缓存 10 分钟
+        if (pickerDepts == null || System.currentTimeMillis() - pickerAt > 600_000L) {
+            try {
+                pickerDepts = ding.deptNames();
+            } catch (Exception e) {
+                pickerDepts = new java.util.ArrayList<>();
+            }
+            try {
+                pickerMembers = ding.directory();
+            } catch (Exception e) {
+                pickerMembers = new java.util.ArrayList<>();
+            }
+            pickerAt = System.currentTimeMillis();
+        }
+        out.put("departments", pickerDepts);
+        java.util.List<Map<String, Object>> slim = new java.util.ArrayList<>();
+        for (Map<String, Object> m : pickerMembers) {
+            Map<String, Object> one = new LinkedHashMap<>();
+            one.put("userid", m.get("userid"));
+            one.put("name", m.get("name"));
+            one.put("mobile", m.get("mobile"));
+            slim.add(one);
+        }
+        out.put("members", slim);
+        return out;
+    }
+
     @GetMapping("/api/dingtalk/status")
     public Map<String, Object> status(HttpServletRequest req) {
         requirePerm(req, "users");

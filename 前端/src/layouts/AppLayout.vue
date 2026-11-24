@@ -124,6 +124,7 @@ const allGroups = [
       { name: 'ledger', title: '发票登记', icon: Tickets },
       { name: 'pending', title: '待审核', icon: Clock, perm: 'review' },
       { name: 'contracts', title: '合同台账', icon: Files, perm: 'contracts' },
+  { name: 'invoice-requests', title: '开票申请', icon: Document, perm: 'contracts' },
   { name: 'notice', title: '公告', icon: Bell },
   { name: 'tools', title: '工具箱', icon: Box }
     ]

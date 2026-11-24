@@ -42,6 +42,12 @@ public class SpaController {
         return index();
     }
 
+    /** 带参数的页面（比如 /invoice-print/12）也要回 index.html */
+    @GetMapping("/invoice-print/{id}")
+    public ResponseEntity<byte[]> printPage() throws IOException {
+        return index();
+    }
+
     /**
      * 兜底：任何不带扩展名、不是 api/ assets/ 开头的 GET 都交给前端路由。
      * 带点的（.js/.css/.png）是静态文件，不在这里处理，免得把 404 吞掉。

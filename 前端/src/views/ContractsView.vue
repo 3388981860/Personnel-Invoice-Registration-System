@@ -9,6 +9,7 @@
           <el-button @click="reload">刷新</el-button>
           <el-button @click="exportExcel">导出</el-button>
           <el-button v-if="isAdmin" @click="openSetDialog">+ 新建项目集</el-button>
+            <el-button @click="openCustomerDlg">客户档案</el-button>
           <el-button type="primary" @click="openProject()">+ 新建项目</el-button>
         </div>
       </div>
@@ -210,6 +211,35 @@
     </el-drawer>
 
     <!-- 项目弹窗 -->
+    <!-- 客户档案 -->
+    <el-dialog v-model="custDlg" title="客户档案" width="760px">
+      <div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <el-input v-model="custForm.name" placeholder="单位全称" style="width:200px" />
+        <el-input v-model="custForm.tax_no" placeholder="企业税号" style="width:190px" />
+        <el-input v-model="custForm.bank" placeholder="开户行" style="width:120px" />
+        <el-input v-model="custForm.account" placeholder="账号" style="width:140px" />
+        <el-button type="primary" :loading="custSaving" @click="saveCustomer">
+          {{ custForm.id ? '保存' : '添加' }}
+        </el-button>
+        <el-button v-if="custForm.id" @click="resetCustForm">取消编辑</el-button>
+      </div>
+      <el-table :data="customers" size="small" border max-height="360px">
+        <el-table-column prop="name" label="单位全称" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="tax_no" label="企业税号" width="190" show-overflow-tooltip />
+        <el-table-column prop="bank" label="开户行" width="110" show-overflow-tooltip />
+        <el-table-column prop="account" label="账号" width="150" show-overflow-tooltip />
+        <el-table-column label="操作" width="110" align="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="editCustomer(row)">编辑</el-button>
+            <el-button link type="danger" size="small" @click="removeCustomer(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="text-muted" style="font-size:12px;margin-top:8px">
+        客户档案填好后，合同和开票申请都能直接选，不用每次手打税号。
+      </div>
+    </el-dialog>
+
     <el-dialog v-model="projectDlg" :title="pform.id ? '编辑项目' : '新建项目'"
                width="520px" append-to-body>
       <el-form label-position="top">
@@ -335,6 +365,13 @@
             <el-radio value="reference">关联（只跟踪）</el-radio>
           </el-radio-group>
         </el-form-item>
+        <el-form-item v-if="cform.kind === 'income'" label="客户档案">
+          <el-select v-model="cform.customer_id" clearable filterable
+                     placeholder="选客户自动填付款方" style="width:100%"
+                     @change="onContractCustomer">
+            <el-option v-for="cu in customers" :key="cu.id" :label="cu.name" :value="cu.id" />
+          </el-select>
+        </el-form-item>
         <div class="form-row">
           <el-form-item label="付款方">
             <el-input v-model="cform.party_a" placeholder="谁付钱" />
@@ -381,6 +418,10 @@ import { api } from '../api'
 import { isAdmin } from '../store'
 
 const q = ref('')
+const customers = ref([])
+const custDlg = ref(false)
+const custSaving = ref(false)
+const custForm = reactive({ id: null, name: '', tax_no: '', bank: '', account: '' })
 const sets = ref([])
 const activeSet = ref('')
 
@@ -479,6 +520,70 @@ async function loadSets() {
   }
 }
 
+/** 打开客户档案 */
+async function openCustomerDlg() {
+  custDlg.value = true
+  resetCustForm()
+  await loadCustomers()
+}
+
+function resetCustForm() {
+  Object.assign(custForm, { id: null, name: '', tax_no: '', bank: '', account: '' })
+}
+
+function editCustomer(row) {
+  Object.assign(custForm, {
+    id: row.id, name: row.name || '', tax_no: row.tax_no || '',
+    bank: row.bank || '', account: row.account || ''
+  })
+}
+
+async function loadCustomers() {
+  try {
+    const r = await api.customers({})
+    customers.value = r.customers || []
+  } catch (e) {
+    customers.value = []
+  }
+}
+
+async function saveCustomer() {
+  if (!custForm.name.trim()) return ElMessage.warning('填单位全称')
+  custSaving.value = true
+  try {
+    await api.customerSave({ ...custForm })
+    ElMessage.success('已保存')
+    resetCustForm()
+    await loadCustomers()
+  } catch (e) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    custSaving.value = false
+  }
+}
+
+async function removeCustomer(row) {
+  try {
+    await ElMessageBox.confirm(`删除客户「${row.name}」？`, '删除', { type: 'warning' })
+  } catch (e) {
+    return
+  }
+  try {
+    await api.customerDelete({ id: row.id })
+    ElMessage.success('已删除')
+    await loadCustomers()
+  } catch (e) {
+    ElMessage.error(e.message || '删除失败')
+  }
+}
+
+/** 合同里选了客户：带出甲方单位和税号 */
+function onContractCustomer(id) {
+  const c = customers.value.find(x => x.id === id)
+  if (!c) return
+  cform.value.party_a = c.name
+}
+
 async function openSetDialog() {
   try {
     const { value } = await ElMessageBox.prompt('给这个项目集起个名字', '新建项目集', {
@@ -560,8 +665,10 @@ async function removeProject(row) {
 function openContract(c, kind) {
   if (c) {
     cform.value = { ...c, amount: c.amount == null ? '' : c.amount }
+  if (!customers.value.length) loadCustomers()
   } else {
     cform.value = {
+      customer_id: null,
       project_id: project.value.id,
       kind: kind || 'income',
       party_a: kind === 'cost' ? '人数（我司）' : '',
@@ -733,6 +840,7 @@ function openFile(id) {
 }
 
 onMounted(async () => {
+  await loadCustomers()
   await loadSets()
   await reload()
 })

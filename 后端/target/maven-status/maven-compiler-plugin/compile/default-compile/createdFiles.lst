@@ -21,6 +21,7 @@ com\xinyu\invoice\web\AnnouncementController.class
 com\xinyu\invoice\web\LogController.class
 com\xinyu\invoice\auth\AuthFilter.class
 com\xinyu\invoice\web\ContractStatsController.class
+com\xinyu\invoice\web\InvoiceRequestController.class
 com\xinyu\invoice\web\InvoiceController.class
 com\xinyu\invoice\service\ContractExportService.class
 com\xinyu\invoice\auth\PasswordTool.class
@@ -43,6 +44,7 @@ com\xinyu\invoice\web\ContractExportController.class
 com\xinyu\invoice\service\DingTalkService.class
 com\xinyu\invoice\web\EntryController.class
 com\xinyu\invoice\service\AttendanceAutoSyncService.class
+com\xinyu\invoice\web\CustomerController.class
 com\xinyu\invoice\web\NotificationController.class
 com\xinyu\invoice\service\ParseService.class
 com\xinyu\invoice\web\AuditController.class
