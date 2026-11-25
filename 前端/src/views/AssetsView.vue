@@ -51,7 +51,11 @@
                 max-height="calc(100vh - 300px)" @selection-change="onSelect">
         <el-table-column type="selection" width="42" :selectable="() => true" />
         <el-table-column prop="code" label="资产编号" width="130">
-          <template #default="{ row }"><span class="mono">{{ row.code }}</span></template>
+          <template #default="{ row }">
+            <el-link type="primary" :underline="false" class="asset-link" @click="openDetail(row)">
+              {{ row.code }}
+            </el-link>
+          </template>
         </el-table-column>
         <el-table-column label="名称" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
@@ -61,7 +65,9 @@
               </template>
               <el-icon class="warn-ico"><WarningFilled /></el-icon>
             </el-tooltip>
-            {{ row.name }}
+            <el-link type="primary" :underline="false" class="asset-link" @click="openDetail(row)">
+              {{ row.name }}
+            </el-link>
           </template>
         </el-table-column>
         <el-table-column prop="type" label="类型" width="90" />
@@ -84,7 +90,7 @@
           <template #default="{ row }"><span class="money">{{ money(row.net_value) }}</span></template>
         </el-table-column>
         <el-table-column prop="ip" label="IP" width="130" show-overflow-tooltip />
-        <el-table-column label="操作" width="130" align="right" fixed="right">
+        <el-table-column label="操作" width="130" align="center" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
             <el-button v-if="isAdmin" link type="danger" size="small" @click="remove(row)">删除</el-button>
@@ -98,6 +104,68 @@
                        layout="total, sizes, prev, pager, next, jumper" background />
       </div>
     </div>
+
+    <!-- 资产详情 -->
+    <el-dialog v-model="detailDlg" title="资产详情" width="820px">
+      <div v-if="detail">
+        <div class="dt-hd">
+          <span class="dt-code">{{ detail.code }}</span>
+          <span class="dt-name">{{ detail.name }}</span>
+          <el-tag :type="statusType(detail.status)" size="small">{{ detail.status }}</el-tag>
+          <span v-if="detail.incomplete" class="dt-warn">
+            ⚠ 信息不全：{{ (detail.missing_fields || []).join('、') }}
+          </span>
+        </div>
+
+        <div class="dt-sec">基本信息</div>
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item label="资产编号">{{ detail.code || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="名称">{{ detail.name || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="类型">{{ detail.type || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="类别">{{ detail.category || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="状态">{{ detail.status || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="财务状态">{{ detail.finance_status || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="使用人">{{ detail.user_name || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="部门">{{ detail.dept || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="位置">{{ detail.location || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="采购日期">{{ detail.buy_date || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="可使用年限">
+            {{ detail.life_years ? detail.life_years + ' 年' : '—' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="原值">{{ money(detail.price) }}</el-descriptions-item>
+          <el-descriptions-item label="月折旧额">{{ money(detail.monthly_dep) }}</el-descriptions-item>
+          <el-descriptions-item label="累计折旧">{{ money(detail.acc_dep) }}</el-descriptions-item>
+          <el-descriptions-item label="净值">{{ money(detail.net_value) }}</el-descriptions-item>
+          <el-descriptions-item label="备注" :span="3">{{ detail.note || '—' }}</el-descriptions-item>
+        </el-descriptions>
+
+        <div class="dt-sec">IT 明细</div>
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item label="计算机名">{{ detail.computer_name || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="系统账号">{{ detail.os_user || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="操作系统">{{ detail.os_version || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="系统安装">{{ detail.os_install || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="型号">{{ detail.model || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="BIOS 日期">{{ detail.bios_date || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="序列号" :span="3">{{ detail.serial_no || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="CPU" :span="3">{{ detail.cpu || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="主板" :span="3">{{ detail.mainboard || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="内存" :span="3">{{ detail.memory || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="硬盘" :span="3">{{ detail.disk || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="硬盘序列号" :span="3">{{ detail.disk_sn || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="显卡" :span="3">{{ detail.gpu || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="显示器" :span="3">{{ detail.monitor || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="网卡" :span="3">{{ detail.nic || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="IP">{{ detail.ip || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="MAC">{{ detail.mac || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="打印机">{{ detail.printer || '—' }}</el-descriptions-item>
+        </el-descriptions>
+      </div>
+      <template #footer>
+        <el-button @click="detailDlg = false">关闭</el-button>
+        <el-button type="primary" @click="editFromDetail">编辑</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 批量补年限 -->
     <el-dialog v-model="batchDlg" title="批量补使用年限" width="420px">
@@ -240,6 +308,8 @@ const selected = ref([])
 const batchDlg = ref(false)
 const batchYears = ref('5')
 const batchSaving = ref(false)
+const detailDlg = ref(false)
+const detail = ref(null)
 const departments = ref([])
 const members = ref([])
 
@@ -343,6 +413,17 @@ async function remove(row) {
   }
 }
 
+function openDetail(row) {
+  detail.value = row
+  detailDlg.value = true
+}
+
+function editFromDetail() {
+  const row = detail.value
+  detailDlg.value = false
+  if (row) openEdit(row)
+}
+
 function onSelect(rows) {
   selected.value = rows
 }
@@ -413,6 +494,18 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.asset-link { font-size: 13px; }
+.dt-hd {
+  display: flex; align-items: center; gap: 10px;
+  padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid #EEF1F5;
+}
+.dt-code { font-family: Consolas, monospace; font-size: 13px; color: #6B7280; }
+.dt-name { font-size: 15px; font-weight: 600; color: #1F2937; }
+.dt-warn { font-size: 12px; color: #E6A23C; margin-left: auto; }
+.dt-sec {
+  font-size: 13px; font-weight: 600; color: #1F2937;
+  margin: 14px 0 8px; padding-left: 8px; border-left: 3px solid var(--brand-accent);
+}
 .warn-ico {
   color: #E6A23C; font-size: 14px; vertical-align: middle;
   margin-right: 4px; cursor: help;

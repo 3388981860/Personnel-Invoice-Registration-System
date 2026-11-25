@@ -47,6 +47,7 @@ com\xinyu\invoice\web\ContractExportController.class
 com\xinyu\invoice\service\DingTalkService.class
 com\xinyu\invoice\web\EntryController.class
 com\xinyu\invoice\service\AttendanceAutoSyncService.class
+com\xinyu\invoice\common\FileServe.class
 com\xinyu\invoice\web\CustomerController.class
 com\xinyu\invoice\web\NotificationController.class
 com\xinyu\invoice\service\ParseService.class

@@ -16,6 +16,11 @@
     <div v-loading="loading">
       <!-- ============ 报销单 ============ -->
       <template v-if="type === 'batch' && batch">
+        <div class="drawer-actions">
+          <el-button type="primary" plain size="small" @click="printBatch">
+            打印报销单（照着抄）
+          </el-button>
+        </div>
         <div class="amount-hero">
           <div class="hero-money">{{ money(batch.amount) }}</div>
           <div class="hero-cap">本单合计 · {{ batch.count }} 张</div>
@@ -255,6 +260,7 @@
           <el-date-picker v-model="bform.reimburse_date" type="date"
                           value-format="YYYY-MM-DD" style="width:100%" />
         </el-form-item>
+
         <el-form-item label="备注">
           <el-input v-model="bform.note" type="textarea" :rows="2" />
         </el-form-item>
@@ -408,6 +414,13 @@ const canDelete = computed(() => {
   if (Number(b.owner_id) !== Number(state.me.id)) return false
   return b.review_status !== 'approved'
 })
+
+/** 打印纸质报销单模板（照着抄到正式单子上） */
+function printBatch() {
+  const b = batch.value
+  if (!b || !b.id) return
+  window.open('/batch-print/' + b.id, '_blank')
+}
 
 function money(v) {
   return '¥' + Number(v || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
@@ -597,8 +610,11 @@ function openBatchEdit() {
     person: b.person || '',
     payee: b.payee || '',
     reimburse_date: b.reimburse_date || '',
-    note: b.note || ''
+    note: b.note || '',
+      dept_name: b.dept_name || '',
+      project_name: b.project_name || ''
   }
+    loadDeptOptions()
   batchEdit.value = true
 }
 
@@ -773,6 +789,9 @@ async function removeBatch() {
 </script>
 
 <style scoped>
+.drawer-actions {
+  display: flex; justify-content: flex-end; margin-bottom: 10px;
+}
 /* 标题栏配色在 main.css 里（teleport 出去的节点 scoped 管不到） */
 .drawer-head { font-size: 15px; font-weight: 600; letter-spacing: .5px; }
 

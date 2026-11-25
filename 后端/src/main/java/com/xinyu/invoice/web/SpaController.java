@@ -43,6 +43,11 @@ public class SpaController {
     }
 
     /** 带参数的页面（比如 /invoice-print/12）也要回 index.html */
+    @GetMapping("/batch-print/{id}")
+    public ResponseEntity<byte[]> batchPrint() throws IOException {
+        return index();
+    }
+
     @GetMapping("/invoice-print/{id}")
     public ResponseEntity<byte[]> printPage() throws IOException {
         return index();

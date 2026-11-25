@@ -4,6 +4,9 @@ import { setUnauthorizedHandler } from './api'
 
 const routes = [
   { path: '/login', name: 'login', component: () => import('./views/LoginView.vue'), meta: { public: true } },
+  { path: '/batch-print/:id', name: 'batch-print',
+    component: () => import('./views/BatchPrintView.vue'),
+    meta: { title: '报销单打印' } },
   { path: '/invoice-print/:id', name: 'invoice-print',
     component: () => import('./views/InvoicePrintView.vue'),
     meta: { title: '开票申请单打印' } },

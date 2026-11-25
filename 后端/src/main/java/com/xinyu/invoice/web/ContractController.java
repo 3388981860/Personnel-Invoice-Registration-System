@@ -267,7 +267,7 @@ public class ContractController extends BaseController {
 
     /** 看扫描件：浏览器里直接打开 */
     @GetMapping("/api/contract/file")
-    public ResponseEntity<byte[]> file(@RequestParam String id, HttpServletRequest req)
+    public ResponseEntity<?> file(@RequestParam String id, HttpServletRequest req)
             throws IOException {
         requirePerm(req, "contracts");
         List<Map<String, Object>> rows = jdbc.queryForList(
@@ -291,13 +291,10 @@ public class ContractController extends BaseController {
             case "jpg", "jpeg" -> MediaType.IMAGE_JPEG;
             default -> MediaType.APPLICATION_OCTET_STREAM;
         };
-        String encoded = URLEncoder.encode(str(rows.get(0).get("file_name")),
-                StandardCharsets.UTF_8).replace("+", "%20");
-        return ResponseEntity.ok()
-                .contentType(type)
-                .cacheControl(CacheControl.noCache())
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=UTF-8''" + encoded)
-                .body(Files.readAllBytes(f));
+        String fileName = str(rows.get(0).get("file_name"));
+        String encoded = fileName.isBlank() ? ""
+                : URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
+        return com.xinyu.invoice.common.FileServe.serve(f, type, encoded, req);
     }
 
     // ---------------------------------------------------------------- 工具

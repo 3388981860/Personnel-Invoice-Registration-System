@@ -188,6 +188,12 @@ public class BatchController extends BaseController {
             String note = str(body.get("note")).strip();
             head.put("note", note.isEmpty() ? null : note);
         }
+        for (String k : List.of("dept_name", "project_name")) {
+            if (body.containsKey(k)) {
+                String v = str(body.get(k)).strip();
+                head.put(k, v.isEmpty() ? null : v);
+            }
+        }
         if (!head.isEmpty()) {
             head.put("updated_at", stamp);
             StringBuilder sql = new StringBuilder("UPDATE batches SET ");

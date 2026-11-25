@@ -54,4 +54,5 @@ D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\ser
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\ContractExportController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\auth\AuthFilter.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\StaticAssetController.java
+D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\common\FileServe.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\AttendanceController.java

@@ -31,7 +31,7 @@ public class FileController extends BaseController {
     }
 
     @GetMapping("/api/file")
-    public ResponseEntity<byte[]> file(@RequestParam String id, HttpServletRequest req)
+    public ResponseEntity<?> file(@RequestParam String id, HttpServletRequest req)
             throws IOException {
         Map<String, Object> u = requireUser(req);
         long rid;
@@ -85,11 +85,6 @@ public class FileController extends BaseController {
                 rec.get("file_name") != null ? rec.get("file_name") : file.getFileName());
         String encoded = URLEncoder.encode(name, StandardCharsets.UTF_8).replace("+", "%20");
 
-        return ResponseEntity.ok()
-                .contentType(type)
-                .cacheControl(CacheControl.noCache())
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "inline; filename*=UTF-8''" + encoded)
-                .body(Files.readAllBytes(file));
+        return com.xinyu.invoice.common.FileServe.serve(file, type, encoded, req);
     }
 }
