@@ -102,7 +102,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   EditPen, Tickets, Clock, Files, DataAnalysis, User, Document,
-  FolderOpened, Coin, Bell, ArrowDown, Setting, SwitchButton, Box
+  FolderOpened, Coin, Bell, ArrowDown, Setting, SwitchButton, Box, Stamp
 } from '@element-plus/icons-vue'
 
 import { api } from '../api'
@@ -123,6 +123,7 @@ const allGroups = [
       { name: 'entry', title: '新建报销单', icon: EditPen },
       { name: 'ledger', title: '发票登记', icon: Tickets },
       { name: 'pending', title: '待审核', icon: Clock, perm: 'review' },
+      { name: 'seal', title: '用印申请', icon: Stamp },
       { name: 'contracts', title: '合同台账', icon: Files, perm: 'contracts' },
   { name: 'invoice-requests', title: '开票申请', icon: Document, perm: 'contracts' },
   { name: 'notice', title: '公告', icon: Bell },

@@ -95,6 +95,20 @@ export const api = {
   attendanceCalendarSet: (body) => post('/api/attendance/calendar/set', body),
   attendanceCalendarSync: (body) => post('/api/attendance/calendar/sync', body),
   attendanceRemind: () => post('/api/attendance/remind', {}),
+  sealOptions: () => get('/api/seal/options'),
+  sealList: (all) => get('/api/seal/list' + (all ? '?all=true' : '')),
+  sealSubmit: (body) => post('/api/seal/submit', body),
+  sealSync: () => post('/api/seal/sync', {}),
+  sealUpload: (file, type) => {
+    const name = btoa(unescape(encodeURIComponent(file.name || 'seal.png')))
+    return request('/api/seal/upload' + (type === 'file' ? '?type=file' : ''), {
+      method: 'POST',
+      raw: true,
+      body: file,
+      headers: { 'X-File-Name': name, 'Content-Type': 'application/octet-stream' }
+    })
+  },
+
   dict: (type) => get('/api/dict' + (type ? '?type=' + type : '')),
   dictSave: (body) => post('/api/dict/save', body),
   dictImport: (body) => post('/api/dict/import', body),

@@ -21,6 +21,7 @@ const routes = [
         { path: 'notice', name: 'notice', component: () => import('./views/NoticeView.vue'), meta: { title: '公告', group: '业务' } },
   { path: 'tools', name: 'tools', component: () => import('./views/ToolsView.vue'), meta: { title: '工具箱', group: '业务' } },
   { path: 'invoice-requests', name: 'invoice-requests', component: () => import('./views/InvoiceRequestsView.vue'), meta: { title: '开票申请', group: '业务', perm: 'contracts' } },
+  { path: 'seal', name: 'seal', component: () => import('./views/SealView.vue'), meta: { title: '用印申请', group: '业务' } },
   { path: 'contracts', name: 'contracts', component: () => import('./views/ContractsView.vue'), meta: { title: '合同台账', group: '业务', perm: 'contracts' } },
       { path: 'attendance', name: 'attendance', component: () => import('./views/AttendanceView.vue'), meta: { title: '考勤看板', group: '管理', perm: 'attendance' } },
   { path: 'assets', name: 'assets', component: () => import('./views/AssetsView.vue'), meta: { title: '固定资产', group: '管理', perm: 'assets' } },

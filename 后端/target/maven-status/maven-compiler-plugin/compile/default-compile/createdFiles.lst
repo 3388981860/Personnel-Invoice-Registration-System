@@ -21,6 +21,8 @@ com\xinyu\invoice\config\SchemaMigrator.class
 com\xinyu\invoice\service\NotifyBridge.class
 com\xinyu\invoice\web\AnnouncementController.class
 com\xinyu\invoice\web\LogController.class
+com\xinyu\invoice\web\SealController.class
+com\xinyu\invoice\service\SealService.class
 com\xinyu\invoice\auth\AuthFilter.class
 com\xinyu\invoice\web\ContractStatsController.class
 com\xinyu\invoice\web\InvoiceRequestController.class

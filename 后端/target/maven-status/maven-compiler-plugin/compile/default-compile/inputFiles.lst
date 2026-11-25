@@ -19,6 +19,7 @@ D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\ExportController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\NotificationController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\auth\Perm.java
+D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\service\SealService.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\LogController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\repo\BatchRepo.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\AuditController.java
@@ -40,6 +41,7 @@ D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\com
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\service\ContractExportService.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\InvoiceApplication.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\AnnouncementController.java
+D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\SealController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\ContractPayController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\web\FixedAssetController.java
 D:\2026\04-信宇科技\02-人数发票登记系统\后端\src\main\java\com\xinyu\invoice\service\DingTalkService.java

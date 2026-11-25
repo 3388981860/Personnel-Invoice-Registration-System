@@ -107,6 +107,35 @@ public class SchemaMigrator implements ApplicationRunner {
                 + "ON contract_billings(contract_id)");
 
 
+        // 用印申请：系统发起、钉钉审批、结果回传
+        jdbc.execute("CREATE TABLE IF NOT EXISTS seal_requests ("
+                + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + "applicant_id INTEGER,"
+                + "applicant_name TEXT,"
+                + "dept_name TEXT,"
+                + "biz_date TEXT,"
+                + "doc_name TEXT,"
+                + "copies INTEGER,"
+                + "doc_category TEXT,"
+                + "seal_type TEXT,"
+                + "note TEXT,"
+                + "photo_ids TEXT,"
+                + "dt_instance_id TEXT,"
+                + "dt_business_id TEXT,"
+                + "status TEXT,"
+                + "result_text TEXT,"
+                + "finish_time TEXT,"
+                + "created_at TEXT,"
+                + "updated_at TEXT)");
+
+        // 用印申请补列：附件
+        try {
+            jdbc.queryForList("SELECT attachment_ids FROM seal_requests LIMIT 1");
+        } catch (Exception e) {
+            jdbc.execute("ALTER TABLE seal_requests ADD COLUMN attachment_ids TEXT");
+            log.info("seal_requests 已补 attachment_ids 列");
+        }
+
         // 用户部门（从钉钉通讯录同步过来）
         try {
             jdbc.queryForList("SELECT dept_name FROM users LIMIT 1");

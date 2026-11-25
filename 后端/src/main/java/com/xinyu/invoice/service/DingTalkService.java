@@ -384,6 +384,86 @@ public class DingTalkService {
         return v == null ? null : String.valueOf(v);
     }
 
+    // ---------------------------------------------------------------- 审批
+
+    /** 创建审批实例（用印申请等） */
+    public com.fasterxml.jackson.databind.JsonNode createProcessInstance(Map<String, Object> body) {
+        String tok = accessToken();
+        return postJson("https://oapi.dingtalk.com/topapi/processinstance/create?access_token=" + tok, body);
+    }
+
+    /** 查审批实例详情 */
+    public com.fasterxml.jackson.databind.JsonNode getProcessInstance(String instanceId) {
+        String tok = accessToken();
+        return postJson("https://oapi.dingtalk.com/topapi/processinstance/get?access_token=" + tok,
+                Map.of("process_instance_id", instanceId));
+    }
+
+    /** 上传文件到钉钉素材库，返回 media_id */
+    public String uploadFile(byte[] data, String filename, String type) {
+        String tok = accessToken();
+        String boundary = "----dsh" + System.currentTimeMillis();
+        try {
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            String head = "--" + boundary + "\r\n"
+                    + "Content-Disposition: form-data; name=\"media\"; filename=\""
+                    + (filename == null ? "a.bin" : filename) + "\"\r\n"
+                    + "Content-Type: application/octet-stream\r\n\r\n";
+            bos.write(head.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            bos.write(data);
+            bos.write(("\r\n--" + boundary + "--\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+            HttpRequest req = HttpRequest.newBuilder(URI.create(
+                            "https://oapi.dingtalk.com/media/upload?access_token=" + tok
+                                    + "&type=" + (type == null ? "file" : type)))
+                    .timeout(Duration.ofSeconds(30))
+                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(bos.toByteArray()))
+                    .build();
+            HttpResponse<String> resp = http.send(req,
+                    HttpResponse.BodyHandlers.ofString(java.nio.charset.StandardCharsets.UTF_8));
+            var r = json.readTree(resp.body());
+            if (r.path("errcode").asInt(-1) != 0) {
+                throw new IllegalStateException("上传失败：" + r.path("errmsg").asText());
+            }
+            return r.path("media_id").asText("");
+        } catch (Exception e) {
+            throw new IllegalStateException("上传失败：" + e.getMessage(), e);
+        }
+    }
+
+    /** 上传图片到钉钉，返回 media_id（用印照片字段要用） */
+    public String uploadImage(byte[] data, String filename) {
+        String tok = accessToken();
+        String boundary = "----dsh" + System.currentTimeMillis();
+        try {
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            String head = "--" + boundary + "\r\n"
+                    + "Content-Disposition: form-data; name=\"media\"; filename=\""
+                    + (filename == null ? "a.png" : filename) + "\"\r\n"
+                    + "Content-Type: application/octet-stream\r\n\r\n";
+            bos.write(head.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            bos.write(data);
+            bos.write(("\r\n--" + boundary + "--\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+            HttpRequest req = HttpRequest.newBuilder(URI.create(
+                            "https://oapi.dingtalk.com/media/upload?access_token=" + tok + "&type=image"))
+                    .timeout(Duration.ofSeconds(30))
+                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(bos.toByteArray()))
+                    .build();
+            HttpResponse<String> resp = http.send(req,
+                    HttpResponse.BodyHandlers.ofString(java.nio.charset.StandardCharsets.UTF_8));
+            var r = json.readTree(resp.body());
+            if (r.path("errcode").asInt(-1) != 0) {
+                throw new IllegalStateException("上传图片失败：" + r.path("errmsg").asText());
+            }
+            return r.path("media_id").asText("");
+        } catch (Exception e) {
+            throw new IllegalStateException("上传图片失败：" + e.getMessage(), e);
+        }
+    }
+
     // ---------------------------------------------------------------- 工具
 
     private JsonNode getJson(String url, String bearer) {
