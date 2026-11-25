@@ -1,4 +1,5 @@
 com\xinyu\invoice\web\HealthController.class
+com\xinyu\invoice\web\FixedAssetController.class
 com\xinyu\invoice\service\WorkdayCalendarService.class
 com\xinyu\invoice\web\ContractController.class
 com\xinyu\invoice\InvoiceApplication.class
@@ -15,6 +16,7 @@ com\xinyu\invoice\repo\InvoiceRepo.class
 com\xinyu\invoice\web\DingTalkController.class
 com\xinyu\invoice\web\ContractPayController.class
 com\xinyu\invoice\auth\Perm.class
+com\xinyu\invoice\web\AssetExportController.class
 com\xinyu\invoice\config\SchemaMigrator.class
 com\xinyu\invoice\service\NotifyBridge.class
 com\xinyu\invoice\web\AnnouncementController.class
@@ -22,6 +24,7 @@ com\xinyu\invoice\web\LogController.class
 com\xinyu\invoice\auth\AuthFilter.class
 com\xinyu\invoice\web\ContractStatsController.class
 com\xinyu\invoice\web\InvoiceRequestController.class
+com\xinyu\invoice\web\StaticAssetController.class
 com\xinyu\invoice\web\InvoiceController.class
 com\xinyu\invoice\service\ContractExportService.class
 com\xinyu\invoice\auth\PasswordTool.class
@@ -54,4 +57,3 @@ com\xinyu\invoice\web\UserController.class
 com\xinyu\invoice\repo\BatchQueryRepo.class
 com\xinyu\invoice\config\AppProps.class
 com\xinyu\invoice\repo\PayeeRepo.class
-com\xinyu\invoice\web\AssetController.class

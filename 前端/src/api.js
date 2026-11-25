@@ -192,6 +192,13 @@ export const api = {
   invoiceRequestMarkInvoiced: (body) => post('/api/invoice_request/mark_invoiced', body),
 
   dingtalkPicker: () => get('/api/dingtalk/picker'),
+
+  // 固定资产
+  assets: (query) => get('/api/assets', query),
+  assetSave: (body) => post('/api/asset/save', body),
+  assetDelete: (body) => post('/api/asset/delete', body),
+  assetRedetect: (body) => post('/api/assets/redetect', body),
+  assetBatchLifeYears: (body) => post('/api/assets/batch_life_years', body),
   projectSetSave: (body) => post('/api/project_set/save', body),
   project: (id) => get('/api/project', { id }),
   saveProject: (payload) => post('/api/project/save', payload),

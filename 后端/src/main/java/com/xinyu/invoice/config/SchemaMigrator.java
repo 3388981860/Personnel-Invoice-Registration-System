@@ -191,6 +191,46 @@ public class SchemaMigrator implements ApplicationRunner {
             log.info("users 表已补 dingtalk_union_id 列");
         }
 
+        // 固定资产
+        jdbc.execute("CREATE TABLE IF NOT EXISTS assets ("
+                + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + "code TEXT,"                    // 资产编号 RS-GDZC-0001
+                + "name TEXT,"                    // 名称
+                + "type TEXT,"                    // 类型（电脑/硬盘…）
+                + "category TEXT,"                // 类别（电子设备…）
+                + "status TEXT,"                  // 在用/闲置/公用/报废/维修
+                + "finance_status TEXT,"          // 财务状态
+                + "user_name TEXT,"               // 使用人
+                + "dept TEXT,"                    // 部门
+                + "location TEXT,"                // 位置
+                + "buy_date TEXT,"                // 采购日期
+                + "price REAL,"                   // 原值
+                + "life_years REAL,"              // 可使用年限
+                + "note TEXT,"
+                // IT 明细
+                + "computer_name TEXT,"
+                + "os_user TEXT,"
+                + "os_version TEXT,"
+                + "os_install TEXT,"
+                + "model TEXT,"
+                + "bios_date TEXT,"
+                + "serial_no TEXT,"
+                + "cpu TEXT,"
+                + "mainboard TEXT,"
+                + "memory TEXT,"
+                + "disk TEXT,"
+                + "disk_sn TEXT,"
+                + "gpu TEXT,"
+                + "monitor TEXT,"
+                + "nic TEXT,"
+                + "ip TEXT,"
+                + "mac TEXT,"
+                + "printer TEXT,"
+                + "created_at TEXT,"
+                + "updated_at TEXT)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_assets_code ON assets(code)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_assets_status ON assets(status)");
+
         // 客户档案：单位全称、税号、开户行、账号（开票申请要用）
         jdbc.execute("CREATE TABLE IF NOT EXISTS customers ("
                 + "id INTEGER PRIMARY KEY AUTOINCREMENT,"

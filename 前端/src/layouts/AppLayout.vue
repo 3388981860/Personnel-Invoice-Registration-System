@@ -133,6 +133,7 @@ const allGroups = [
     name: '管理',
     items: [
       { name: 'attendance', title: '考勤看板', icon: Clock, perm: 'attendance' },
+      { name: 'assets', title: '固定资产', icon: Box, perm: 'assets' },
       { name: 'stats', title: '数据总览', icon: DataAnalysis, perm: 'stats' },
       { name: 'users', title: '用户管理', icon: User, perm: 'users' },
       { name: 'dict', title: '数据字典', icon: Document, perm: 'dict' },

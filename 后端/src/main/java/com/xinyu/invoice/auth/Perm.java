@@ -29,6 +29,7 @@ public final class Perm {
         ALL.put("logs", "操作日志");
         ALL.put("tools", "工具箱维护（增删改工具卡片）");
         ALL.put("notice", "发布公告");
+        ALL.put("assets", "固定资产（查看、登记、导出）");
         ALL.put("attendance", "考勤看板");
         ALL.put("dict", "数据字典维护（报销部门 / 报销项目）");
     }

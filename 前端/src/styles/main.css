@@ -305,6 +305,20 @@ body {
 
 .content { flex: 1; overflow: auto; padding: 16px 20px 24px; }
 
+
+/* 筛选行：里面的输入框/下拉框等宽等高，别一个宽一个窄 */
+.filter-row {
+  display: flex; gap: 8px; flex: none;
+}
+.filter-row > .el-input,
+.filter-row > .el-select {
+  flex: 1 1 0; width: 0; min-width: 0; box-sizing: border-box;
+}
+.filter-row .el-input__wrapper,
+.filter-row .el-select__wrapper {
+  min-height: 32px;
+}
+
 /* 整页撑满：表格吃掉剩余高度，分页条贴到页面底部 */
 .fill-page {
   display: flex; flex-direction: column;
@@ -328,7 +342,7 @@ body {
 }
 .fill-page .pager {
   flex: none;
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
   padding: 10px 16px;
   border-top: 1px solid #EEF1F5;
   background: #fff;
