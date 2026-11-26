@@ -25,10 +25,13 @@ public class SealController extends BaseController {
 
     private final SealService seal;
     private final com.xinyu.invoice.service.DingTalkService ding;
+    private final com.xinyu.invoice.service.SealCoverService cover;
 
-    public SealController(SealService seal, com.xinyu.invoice.service.DingTalkService ding) {
+    public SealController(SealService seal, com.xinyu.invoice.service.DingTalkService ding,
+                          com.xinyu.invoice.service.SealCoverService cover) {
         this.seal = seal;
         this.ding = ding;
+        this.cover = cover;
     }
 
     /** 下拉选项（从钉钉历史单据里收集出来的真实可选值） */
@@ -92,6 +95,7 @@ public class SealController extends BaseController {
         String mediaId;
         if ("file".equals(type)) {
             mediaId = ding.uploadFile(raw, name.isBlank() ? "attachment" : name, "file");
+            cover.saveAttachment(mediaId, name, raw);
         } else {
             if (name.isBlank()) {
                 name = "seal.png";
@@ -106,6 +110,27 @@ public class SealController extends BaseController {
         return out;
     }
 
+    /** 预览自动生成的封面（调试用） */
+    @GetMapping("/api/seal/cover-preview")
+    public org.springframework.http.ResponseEntity<byte[]> coverPreview(
+            @RequestParam String media_id, @RequestParam(required = false) String doc_name,
+            HttpServletRequest req) {
+        requireUser(req);
+        java.util.Map<String, String> meta = new java.util.LinkedHashMap<>();
+        meta.put("doc_name", doc_name == null ? "示例：2026年度瓯海区政务信息系统集中运维支撑服务项目合同" : doc_name);
+        meta.put("person", "张三");
+        meta.put("date", java.time.LocalDate.now().toString());
+        meta.put("category", "合同类");
+        meta.put("seal", "公章");
+        meta.put("copies", "3");
+        byte[] png = cover.cover(media_id, meta);
+        if (png == null) {
+            throw new ApiException("没有这个附件的缓存，请先上传一次附件");
+        }
+        return org.springframework.http.ResponseEntity.ok()
+                .contentType(org.springframework.http.MediaType.IMAGE_PNG)
+                .body(png);
+    }
     /** 提交用印申请 */
     @PostMapping("/api/seal/submit")
     public Map<String, Object> submit(@RequestBody Map<String, Object> body, HttpServletRequest req) {
@@ -148,8 +173,32 @@ public class SealController extends BaseController {
         if (attachIds.isEmpty()) {
             throw new ApiException("请上传用印文件附件");
         }
+        // 没传照片就自己生成一张封面顶上（钉钉该字段必填）
         if (photoIds.isEmpty()) {
-            throw new ApiException("请上传用印文件照片（钉钉模板里这个字段是必填的）");
+            java.util.Map<String, String> meta = new java.util.LinkedHashMap<>();
+            meta.put("doc_name", docName);
+            meta.put("person", person);
+            meta.put("date", bizDate);
+            meta.put("category", category);
+            meta.put("seal", sealType);
+            meta.put("copies", String.valueOf(copies));
+            for (String attId : attachIds) {
+                byte[] png = cover.cover(attId, meta);
+                if (png != null && png.length > 0) {
+                    try {
+                        String mediaId = ding.uploadImage(png, "cover.png");
+                        if (mediaId != null && !mediaId.isBlank()) {
+                            photoIds.add(mediaId);
+                            break;
+                        }
+                    } catch (Exception e) {
+                        // 换下一个附件试
+                    }
+                }
+            }
+            if (photoIds.isEmpty()) {
+                throw new ApiException("照片没传，自动生成封面也失败了，请手动上传一张照片");
+            }
         }
 
         // 部门 id：钉钉建单必填，取发起人的第一个部门，拿不到就用人数的 1

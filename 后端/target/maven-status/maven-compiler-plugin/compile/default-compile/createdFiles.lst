@@ -60,3 +60,4 @@ com\xinyu\invoice\web\UserController.class
 com\xinyu\invoice\repo\BatchQueryRepo.class
 com\xinyu\invoice\config\AppProps.class
 com\xinyu\invoice\repo\PayeeRepo.class
+com\xinyu\invoice\service\SealCoverService.class

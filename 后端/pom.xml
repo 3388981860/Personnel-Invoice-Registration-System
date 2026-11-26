@@ -42,6 +42,12 @@
       <version>3.46.1.0</version>
     </dependency>
     <!-- 导出 Excel -->
+    <!-- 把附件 PDF 首页渲染成封面上传钉钉 -->
+    <dependency>
+      <groupId>org.apache.pdfbox</groupId>
+      <artifactId>pdfbox</artifactId>
+      <version>2.0.31</version>
+    </dependency>
     <dependency>
       <groupId>org.apache.poi</groupId>
       <artifactId>poi-ooxml</artifactId>
