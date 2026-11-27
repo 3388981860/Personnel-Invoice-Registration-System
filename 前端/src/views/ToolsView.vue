@@ -8,46 +8,64 @@
                    @click="openNew">＋ 添加工具</el-button>
       </div>
 
-      <div class="tool-wrap">
-        <!-- 系统内置工具 -->
-        <div v-for="b in builtins" :key="b.key" class="tool-card builtin">
-          <div class="tool-top">
-            <span class="tool-icon">{{ b.icon }}</span>
-            <div class="tool-name">
-              {{ b.name }}
-              <el-tag size="small" effect="dark" type="success">内置</el-tag>
+      <!-- 系统内置 -->
+      <div class="group">
+        <div class="group-hd">
+          <span class="group-title">系统内置</span>
+          <span class="group-sub">系统自带的小工具，不用另外开网页</span>
+        </div>
+        <div class="tool-wrap">
+          <div v-for="b in builtins" :key="b.key" class="tool-card builtin">
+            <div class="tool-top">
+              <span class="tool-icon">{{ b.icon }}</span>
+              <div class="tool-name">{{ b.name }}</div>
+            </div>
+            <div class="tool-desc">{{ b.description }}</div>
+            <div class="tool-url mono">点开就在系统里用</div>
+            <div class="tool-actions">
+              <el-button type="primary" link size="small" @click="openBuiltin(b)">
+                打开工具 →
+              </el-button>
             </div>
           </div>
-          <div class="tool-desc">{{ b.description }}</div>
-          <div class="tool-url mono">系统自带，不用另开页面</div>
-          <div class="tool-actions">
-            <el-button type="primary" link size="small" @click="openBuiltin(b)">打开工具 →</el-button>
-          </div>
         </div>
+      </div>
 
-        <div v-for="t in tools" :key="t.id" class="tool-card" :class="{ off: !t.enabled }">
-          <div class="tool-top">
-            <span class="tool-icon">{{ t.icon || '🚀' }}</span>
-            <div class="tool-name">
-              {{ t.name }}
-              <el-tag v-if="t.category" size="small" effect="plain">{{ t.category }}</el-tag>
+      <!-- 自行添加 -->
+      <div class="group">
+        <div class="group-hd">
+          <span class="group-title">常用工具</span>
+          <span class="group-sub">
+            自己加的外部工具{{ canEdit ? '，点右上角「添加工具」加一个' : '' }}
+          </span>
+        </div>
+        <div class="tool-wrap">
+          <div v-for="t in tools" :key="t.id" class="tool-card" :class="{ off: !t.enabled }">
+            <div class="tool-top">
+              <span class="tool-icon">{{ t.icon || '🚀' }}</span>
+              <div class="tool-name">
+                {{ t.name }}
+                <el-tag v-if="t.category" size="small" effect="plain">{{ t.category }}</el-tag>
+              </div>
+            </div>
+            <div class="tool-desc">{{ t.description || '点一下就能打开' }}</div>
+            <div class="tool-url mono">{{ t.url || '还没填地址' }}</div>
+            <div class="tool-actions">
+              <el-button type="primary" link size="small" :disabled="!t.url" @click="open(t)">
+                打开工具 →
+              </el-button>
+              <template v-if="canEdit">
+                <el-button link size="small" @click="openEdit(t)">编辑</el-button>
+                <el-button link type="danger" size="small" @click="remove(t)">删除</el-button>
+              </template>
             </div>
           </div>
-          <div class="tool-desc">{{ t.description || '点一下就能打开' }}</div>
-          <div class="tool-url mono">{{ t.url || '还没填地址' }}</div>
-          <div class="tool-actions">
-            <el-button type="primary" link size="small" :disabled="!t.url" @click="open(t)">
-              打开工具 →
-            </el-button>
-            <template v-if="canEdit">
-              <el-button link size="small" @click="openEdit(t)">编辑</el-button>
-              <el-button link type="danger" size="small" @click="remove(t)">删除</el-button>
-            </template>
-          </div>
-        </div>
 
-        <div v-if="!tools.length" class="empty">
-          还没有工具{{ canEdit ? '，点右上角「添加工具」加一个' : '' }}
+          <div v-if="!tools.length" class="empty-card">
+            <div class="ec-icon">＋</div>
+            <div class="ec-main">还没有添加外部工具</div>
+            <div class="ec-sub">{{ canEdit ? '比如公文助手、PDF 工具箱，填个网址就行' : '等管理员添加' }}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -175,6 +193,24 @@ onMounted(load)
 </script>
 
 <style scoped>
+.group { padding: 12px 16px 4px; }
+.group + .group { border-top: 1px dashed #E7EDF5; margin-top: 6px; }
+.group-hd {
+  display: flex; align-items: baseline; gap: 10px;
+  margin-bottom: 10px;
+}
+.group-title {
+  font-size: 13px; font-weight: 600; color: #1F2937;
+  padding-left: 8px; border-left: 3px solid var(--brand-accent);
+}
+.group-sub { font-size: 12px; color: #9AA6B6; }
+.empty-card {
+  border: 1.5px dashed #DCE4EF; border-radius: 8px;
+  padding: 26px 18px; text-align: center; width: 260px;
+}
+.ec-icon { font-size: 20px; color: #B8C4D6; }
+.ec-main { font-size: 13px; color: #4B5563; margin-top: 6px; }
+.ec-sub { font-size: 12px; color: #9AA6B6; margin-top: 4px; }
 .tool-card.builtin {
   border-color: #C7E3C7;
   background: linear-gradient(180deg, #F7FDF7 0%, #FFFFFF 60%);
