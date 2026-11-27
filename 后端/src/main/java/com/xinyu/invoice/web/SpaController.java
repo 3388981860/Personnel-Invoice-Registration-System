@@ -54,12 +54,17 @@ public class SpaController {
     }
 
     /**
-     * 兜底：任何不带扩展名、不是 api/ assets/ 开头的 GET 都交给前端路由。
-     * 带点的（.js/.css/.png）是静态文件，不在这里处理，免得把 404 吞掉。
+     * 兜底：所有没被其它 Controller 接住的 GET 都交给前端路由。
+     *
+     * 以前只匹配「一段路径」，所以 /tools/watermark 这种两段的会 404；
+     * 现在用 /**，两段三段都能兜住。api/assets 仍然放行成 404，免得把真 404 吞掉。
      */
-    @GetMapping("/{path:[^\\.]*}")
-    public ResponseEntity<byte[]> spa(@PathVariable String path) throws IOException {
-        if (path.startsWith("api") || path.startsWith("assets")) {
+    @GetMapping("/**")
+    public ResponseEntity<byte[]> spa(jakarta.servlet.http.HttpServletRequest req)
+            throws IOException {
+        String path = req.getRequestURI();
+        if (path.startsWith("/api") || path.startsWith("/assets")
+                || path.startsWith("/actuator")) {
             return ResponseEntity.notFound().build();
         }
         return index();

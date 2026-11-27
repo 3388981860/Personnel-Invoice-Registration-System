@@ -9,6 +9,22 @@
       </div>
 
       <div class="tool-wrap">
+        <!-- 系统内置工具 -->
+        <div v-for="b in builtins" :key="b.key" class="tool-card builtin">
+          <div class="tool-top">
+            <span class="tool-icon">{{ b.icon }}</span>
+            <div class="tool-name">
+              {{ b.name }}
+              <el-tag size="small" effect="dark" type="success">内置</el-tag>
+            </div>
+          </div>
+          <div class="tool-desc">{{ b.description }}</div>
+          <div class="tool-url mono">系统自带，不用另开页面</div>
+          <div class="tool-actions">
+            <el-button type="primary" link size="small" @click="openBuiltin(b)">打开工具 →</el-button>
+          </div>
+        </div>
+
         <div v-for="t in tools" :key="t.id" class="tool-card" :class="{ off: !t.enabled }">
           <div class="tool-top">
             <span class="tool-icon">{{ t.icon || '🚀' }}</span>
@@ -67,6 +83,19 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+
+const builtins = [
+  {
+    key: 'watermark',
+    name: '图片水印',
+    icon: '🖼',
+    description: '给图片加水印（文字、平铺、透明度），支持批量',
+    route: 'watermark'
+  }
+]
 
 const tools = ref([])
 const canEdit = ref(false)
@@ -82,6 +111,10 @@ async function load() {
   } catch (e) {
     ElMessage.error(e.message || '读取失败')
   }
+}
+
+function openBuiltin(b) {
+  router.push({ name: b.route })
 }
 
 function openNew() {
@@ -142,6 +175,10 @@ onMounted(load)
 </script>
 
 <style scoped>
+.tool-card.builtin {
+  border-color: #C7E3C7;
+  background: linear-gradient(180deg, #F7FDF7 0%, #FFFFFF 60%);
+}
 .tool-wrap {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
