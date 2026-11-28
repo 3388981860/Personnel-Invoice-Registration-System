@@ -113,7 +113,29 @@ public class DingTalkService {
     // ---------------------------------------------------------------- 通讯录
 
     /** 读全公司成员：userid / 姓名 / 手机 / 部门 */
+    /** 通讯录缓存（10 分钟），避免每次导出都重新遍历部门 */
+    private volatile List<Map<String, Object>> cacheDir;
+    private volatile long cacheAt;
+    private static final long CACHE_MS = 10 * 60 * 1000L;
+
     public List<Map<String, Object>> directory() {
+        List<Map<String, Object>> cached = cacheDir;
+        if (cached != null && System.currentTimeMillis() - cacheAt < CACHE_MS) {
+            return cached;
+        }
+        List<Map<String, Object>> fresh = directoryUncached();
+        cacheDir = fresh;
+        cacheAt = System.currentTimeMillis();
+        return fresh;
+    }
+
+    /** 强制重读通讯录 */
+    public List<Map<String, Object>> directoryFresh() {
+        cacheDir = null;
+        return directory();
+    }
+
+    private List<Map<String, Object>> directoryUncached() {
         String tok = accessToken();
         List<Long> depts = new ArrayList<>();
         depts.add(1L);

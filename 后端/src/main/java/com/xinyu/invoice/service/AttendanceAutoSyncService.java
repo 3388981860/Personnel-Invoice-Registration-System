@@ -34,16 +34,22 @@ public class AttendanceAutoSyncService {
         this.ding = ding;
     }
 
-    /** 每天 07:10：补齐昨天和今天的打卡 */
+    /** 每天 07:10：补昨天和今天（昨天数据可能在夜里才定稿） */
     @Scheduled(cron = "0 10 7 * * *")
-    public void syncRecentDays() {
+    public void syncMorning() {
         runRecent(2);
     }
 
-    /** 服务刚起来时补一次（防止机器重启错过时间点） */
-    @Scheduled(initialDelay = 120_000, fixedDelay = 3_600_000)
-    public void catchUpHourly() {
-        runRecent(3);
+    /** 中午 12:30：只补今天 */
+    @Scheduled(cron = "0 30 12 * * *")
+    public void syncNoon() {
+        runRecent(1);
+    }
+
+    /** 下班后 18:10：只补今天，保证当天的打卡记录是全的 */
+    @Scheduled(cron = "0 10 18 * * *")
+    public void syncEvening() {
+        runRecent(1);
     }
 
     /** 每月 1 号 06:00：把上个月整月重拉一遍 */

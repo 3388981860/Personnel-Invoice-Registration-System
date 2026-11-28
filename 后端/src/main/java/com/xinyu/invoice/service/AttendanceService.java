@@ -52,7 +52,8 @@ public class AttendanceService {
         LocalDate date = LocalDate.now();
         // 以工作日日历为准（法定节假日也算休息）
         boolean weekend = !calendar.isWorkday(date);
-        if (force || stale(date)) {
+        // 只有「手动刷新」或「今天还没有任何记录」才去调钉钉，其余读本地缓存省配额
+        if (force || noDataToday(date)) {
             sync(date);
         }
 
@@ -222,6 +223,13 @@ public java.util.Set<String> exemptIds() {
                         + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 day, dtUserId, name, onDuty, offDuty, onResult, offResult, address,
                 kinds[0], kinds[1], approvalNote(result.path("approve_list")), now);
+    }
+
+    /** 今天一条记录都没有（第一次打开页面时才为 true） */
+    private boolean noDataToday(LocalDate date) {
+        Integer n = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance_daily WHERE work_date = ?", Integer.class, date.toString());
+        return n == null || n == 0;
     }
 
     private boolean stale(LocalDate date) {
